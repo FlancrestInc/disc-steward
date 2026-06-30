@@ -89,6 +89,20 @@ class JellyfinLogsConfig:
 
 
 @dataclass
+class PathMapping:
+    controller_path: Path
+    barnabas_path: Path | None = None
+    eddy_path: Path | None = None
+
+    def native_path_for(self, machine: str) -> Path | None:
+        if machine == "barnabas":
+            return self.barnabas_path
+        if machine == "eddy":
+            return self.eddy_path
+        raise ValueError(f"Unknown path mapping machine: {machine}")
+
+
+@dataclass
 class AppConfig:
     pipeline_root: Path
     raw_rip_path: Path
@@ -152,6 +166,7 @@ class AppConfig:
     japanese_anime: JapaneseAnimeConfig = field(default_factory=JapaneseAnimeConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
     jellyfin_logs: JellyfinLogsConfig = field(default_factory=JellyfinLogsConfig)
+    path_mappings: dict[str, list[PathMapping]] = field(default_factory=dict)
 
     @classmethod
     def default_for_root(cls, root: Path) -> "AppConfig":
@@ -179,9 +194,70 @@ class AppConfig:
             },
         )
 
+    @staticmethod
+    def path_mappings_for(
+        barnabas: list[tuple[Path, Path]] | None = None,
+        eddy: list[tuple[Path, Path]] | None = None,
+    ) -> dict[str, list[PathMapping]]:
+        return {
+            "barnabas": [PathMapping(_path(controller), barnabas_path=_path(native)) for controller, native in (barnabas or [])],
+            "eddy": [PathMapping(_path(controller), eddy_path=_path(native)) for controller, native in (eddy or [])],
+        }
+
+    def to_barnabas_path(self, path: str | Path) -> Path:
+        return self._controller_to_native(path, "barnabas")
+
+    def to_eddy_path(self, path: str | Path) -> Path:
+        return self._controller_to_native(path, "eddy")
+
+    def to_controller_path(self, path: str | Path, machine: str) -> Path:
+        source = _path(path)
+        for mapping in _longest_mappings(self.path_mappings.get(machine, []), machine, native=True):
+            native_root = mapping.native_path_for(machine)
+            if native_root is None:
+                continue
+            translated = _replace_prefix(source, native_root, mapping.controller_path)
+            if translated is not None:
+                return translated
+        return source
+
+    def mount_unavailable_for(self, path: str | Path) -> Path | None:
+        controller_path = _path(path)
+        for mappings in self.path_mappings.values():
+            for mapping in _longest_mappings(mappings):
+                if _replace_prefix(controller_path, mapping.controller_path, mapping.controller_path) is not None:
+                    return None if mapping.controller_path.exists() else mapping.controller_path
+        return None
+
+    def _controller_to_native(self, path: str | Path, machine: str) -> Path:
+        source = _path(path)
+        for mapping in _longest_mappings(self.path_mappings.get(machine, [])):
+            native_root = mapping.native_path_for(machine)
+            if native_root is None:
+                continue
+            translated = _replace_prefix(source, mapping.controller_path, native_root)
+            if translated is not None:
+                return translated
+        return source
+
 
 def _path(value: str | Path) -> Path:
     return Path(value).expanduser()
+
+
+def _replace_prefix(path: Path, old_root: Path, new_root: Path) -> Path | None:
+    try:
+        return new_root / path.relative_to(old_root)
+    except ValueError:
+        return None
+
+
+def _longest_mappings(mappings: list[PathMapping], machine: str | None = None, native: bool = False) -> list[PathMapping]:
+    def key(mapping: PathMapping) -> int:
+        root = mapping.native_path_for(machine or "") if native and machine else mapping.controller_path
+        return len(root.parts) if root else 0
+
+    return sorted(mappings, key=key, reverse=True)
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -221,6 +297,7 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
     japanese_anime = data.get("japanese_anime", {})
     jellyfin_logs = data.get("jellyfin_logs", {})
     metadata_providers = metadata.get("providers", {})
+    path_mappings = _parse_path_mappings(data.get("path_mappings", {}))
     cleanup_config = CleanupConfig(
         enabled=bool(cleanup.get("enabled", data.get("cleanup_enabled", False))),
         dry_run=bool(cleanup.get("dry_run", data.get("dry_run", True))),
@@ -344,4 +421,26 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
             log_path=jellyfin_logs.get("log_path", ""),
             scan_recent_days=int(jellyfin_logs.get("scan_recent_days", 7)),
         ),
+        path_mappings=path_mappings,
     )
+
+
+def _parse_path_mappings(raw: dict[str, Any]) -> dict[str, list[PathMapping]]:
+    parsed: dict[str, list[PathMapping]] = {"barnabas": [], "eddy": []}
+    for machine in parsed:
+        entries = raw.get(machine, [])
+        if isinstance(entries, dict):
+            entries = [entries]
+        for entry in entries or []:
+            controller = entry.get("controller_path")
+            native = entry.get(f"{machine}_path", entry.get("native_path"))
+            if not controller or not native:
+                continue
+            parsed[machine].append(
+                PathMapping(
+                    controller_path=_path(controller),
+                    barnabas_path=_path(native) if machine == "barnabas" else None,
+                    eddy_path=_path(native) if machine == "eddy" else None,
+                )
+            )
+    return parsed

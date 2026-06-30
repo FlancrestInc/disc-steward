@@ -118,19 +118,22 @@ def generate_final_paths(
     decisions: list[FileReviewDecision],
 ) -> dict[int, GeneratedPath]:
     included = [decision for decision in decisions if decision.include_in_work_order]
-    raw_paths = {decision.source_file_id: _build_path_for_file(config, job, decision) for decision in included}
-    counts = Counter(str(path) for path in raw_paths.values())
+    controller_paths = {decision.source_file_id: _build_path_for_file(config, job, decision) for decision in included}
+    final_paths = {source_file_id: config.to_eddy_path(path) for source_file_id, path in controller_paths.items()}
+    counts = Counter(str(path) for path in final_paths.values())
     generated: dict[int, GeneratedPath] = {}
-    for source_file_id, final_path in raw_paths.items():
+    for source_file_id, final_path in final_paths.items():
+        controller_path = controller_paths[source_file_id]
         conflicts: list[str] = []
         if counts[str(final_path)] > 1:
             conflicts.append("duplicate generated final path")
-        if final_path.exists():
+        if controller_path.exists():
             conflicts.append("final path already exists")
         generated[source_file_id] = GeneratedPath(
             source_file_id=source_file_id,
             final_path=final_path,
             output_name=final_path.name,
+            controller_path=controller_path,
             conflicts=conflicts,
         )
     return generated
@@ -161,7 +164,7 @@ def build_final_library_path(config: AppConfig, decision: ReviewDecision) -> Pat
         encoding_profile=decision.encoding_profile,
         subtitle_policy=decision.subtitle_policy,
     )
-    return _build_path_for_file(config, job, file_decision)
+    return config.to_eddy_path(_build_path_for_file(config, job, file_decision))
 
 
 def _metadata_ids(job: JobReviewMetadata, decision: FileReviewDecision) -> dict[str, str]:
@@ -185,7 +188,11 @@ def build_fileflows_item_payload(
     decision: FileReviewDecision,
     source: ScannedFile | None = None,
 ) -> dict:
-    final_path = Path(decision.generated_final_path) if decision.generated_final_path else _build_path_for_file(config, job, decision)
+    final_path = (
+        config.to_eddy_path(Path(decision.generated_final_path))
+        if decision.generated_final_path
+        else config.to_eddy_path(_build_path_for_file(config, job, decision))
+    )
     subtitle_plan = (
         plan_to_dict(
             generate_subtitle_plan(
@@ -209,7 +216,7 @@ def build_fileflows_item_payload(
     return {
         "job_id": job_id,
         "item_id": item_id,
-        "source_path": str(source_path),
+        "source_path": str(config.to_barnabas_path(source_path)),
         "content_type": decision.content_type or job.content_type,
         "role": decision.role,
         "title": job.title,
@@ -222,7 +229,7 @@ def build_fileflows_item_payload(
         "subtitle_policy": decision.subtitle_policy,
         "subtitle_plan": subtitle_plan,
         "output_name": final_path.name,
-        "barnabas_validation_output_dir": str(config.validation_needed_path / f"job_{job_id}"),
+        "barnabas_validation_output_dir": str(config.to_barnabas_path(config.validation_needed_path / f"job_{job_id}")),
         "final_library_path": str(final_path),
         "preserve_original_audio": True,
         "preserve_original_subtitles": True,
@@ -234,7 +241,7 @@ def build_work_order_payload(config: AppConfig, job_id: int, source_path: Path, 
     final_path = build_final_library_path(config, decision)
     return {
         "job_id": job_id,
-        "source_path": str(source_path),
+        "source_path": str(config.to_barnabas_path(source_path)),
         "content_type": decision.content_type,
         "role": decision.role,
         "title": decision.title,
@@ -313,7 +320,8 @@ def create_fileflows_work_orders(db, config: AppConfig, job_id: int) -> Path:
     manifest = {
         "job_id": job_id,
         "disc_folder": job.disc_title,
-        "disc_path": job.disc_path,
+        "disc_path": str(config.to_barnabas_path(Path(job.disc_path))),
+        "controller_disc_path": job.disc_path,
         "parent_title": job_review.title,
         "year": job_review.year,
         "content_type": job_review.content_type,
@@ -323,7 +331,7 @@ def create_fileflows_work_orders(db, config: AppConfig, job_id: int) -> Path:
         "target_library_root": job_review.library_root,
         "warnings": [*job_review.warnings, *warnings],
         "notes": job_review.notes,
-        "items": [str(path) for path in item_paths],
+        "items": [str(config.to_barnabas_path(path)) for path in item_paths],
         "todo": "Expose this folder to FileFlows or a reviewed watched-folder script; Disc Steward does not call FileFlows directly.",
     }
     (job_dir / "job_manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")

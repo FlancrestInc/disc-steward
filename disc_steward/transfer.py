@@ -87,18 +87,35 @@ def _transfer_with_local_mount(
     any_failed = False
     any_dry_run = False
     incoming_job_dir = config.eddy_incoming_path / f"job_{job_id}"
+    incoming_external_dir = config.to_eddy_path(incoming_job_dir)
+    unavailable = config.mount_unavailable_for(incoming_job_dir)
+    if unavailable is not None:
+        return TransferSummary(
+            job_id=job_id,
+            status="failed",
+            warnings=[f"mount unavailable: {unavailable}"],
+        )
     incoming_job_dir.mkdir(parents=True, exist_ok=True)
     for item in items:
         source = Path(item["matched_output_path"])
-        final_path = Path(item["expected_final_path"])
+        final_external_path = Path(item["expected_final_path"])
+        final_path = config.to_controller_path(final_external_path, "eddy")
         incoming_path = incoming_job_dir / final_path.name
+        incoming_external_path = incoming_external_dir / final_path.name
         result = TransferItemResult(
             source_file_id=int(item["source_file_id"]),
             source_output_path=str(source),
-            incoming_path=str(incoming_path),
-            final_path=str(final_path),
+            incoming_path=str(incoming_external_path),
+            final_path=str(final_external_path),
             verification=config.transfer_verify,
         )
+        unavailable = config.mount_unavailable_for(final_path)
+        if unavailable is not None:
+            result.status = "failed"
+            result.error = f"mount unavailable: {unavailable}"
+            any_failed = True
+            results.append(result)
+            continue
         conflict = detect_transfer_conflict(final_path, config.overwrite_existing)
         if conflict.conflict:
             result.status = "conflict"

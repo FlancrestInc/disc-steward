@@ -363,7 +363,7 @@ def render_job_review(
         f"""
         <p><a href="/">Back to jobs</a></p>
         <h1>{escape(job.disc_title)}</h1>
-        <p class="muted">Job {job.id} · {escape(job.status)} · {escape(job.disc_path)}</p>
+        <p class="muted">Job {job.id} · {escape(job.status)} · Controller path: <code>{escape(job.disc_path)}</code></p>
         {error_html}
         <form method="post" action="/jobs/{job_id}/save">
           {render_job_fields(config, job_review)}
@@ -490,11 +490,15 @@ def render_file_card(config: AppConfig, row: dict, decision: FileReviewDecision,
     subtitle_plan = generate_subtitle_plan(source_for_plan, decision.content_type, decision.subtitle_policy)
     issues = _issues(classification)
     final_path = escape(str(generated.final_path)) if generated else ""
+    controller_final_path = ""
+    if generated and generated.controller_path and Path(generated.final_path) != generated.controller_path:
+        controller_final_path = f"<p><strong>Gospel final placement path:</strong> <code>{escape(str(generated.controller_path))}</code></p>"
     conflicts = generated.conflicts if generated else []
     return f"""
     <article class="file-card">
       <h3>{escape(row['filename'])}</h3>
-      <p class="muted">{escape(row['path'])}</p>
+      <p class="muted"><strong>Controller path:</strong> <code>{escape(row['path'])}</code></p>
+      {_mapped_path_line('Barnabas path', config.to_barnabas_path(Path(row['path'])), Path(row['path']))}
       <div class="tech">
         <span>Duration: {format_duration(row['duration_seconds'])}</span>
         <span>Resolution: {video.get('width') or '?'}x{video.get('height') or '?'}</span>
@@ -510,7 +514,8 @@ def render_file_card(config: AppConfig, row: dict, decision: FileReviewDecision,
       {"<p class='errors'>Japanese/anime content detected. Review title and subtitle handling.</p>" if subtitle_plan.japanese_or_anime else ""}
       <p><strong>Subtitle plan:</strong> {escape(', '.join(subtitle_plan.statuses))}</p>
       {"<p class='errors'>" + escape('; '.join(subtitle_plan.warnings)) + "</p>" if subtitle_plan.warnings else ""}
-      <p><strong>Final path preview:</strong> <code>{final_path}</code></p>
+      <p><strong>Final destination preview:</strong> <code>{final_path}</code></p>
+      {controller_final_path}
       {"<p class='errors'>" + escape('; '.join(conflicts)) + "</p>" if conflicts else ""}
       <div class="file-fields">
         <label><input type="checkbox" name="{prefix}include" {"checked" if decision.include_in_work_order else ""}> Include in FileFlows</label>
@@ -537,6 +542,12 @@ def render_file_card(config: AppConfig, row: dict, decision: FileReviewDecision,
       </div>
     </article>
     """
+
+
+def _mapped_path_line(label: str, mapped: Path, original: Path) -> str:
+    if mapped == original:
+        return ""
+    return f"<p class='muted'><strong>{escape(label)}:</strong> <code>{escape(str(mapped))}</code></p>"
 
 
 def render_phase3_sections(db: Database, job_id: int) -> str:

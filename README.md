@@ -1,22 +1,58 @@
 # Disc Steward
 
-Disc Steward is a safe, observable control-plane service for a Barnabas-to-Eddy media pipeline. Barnabas ingests and processes ripped discs; Eddy stores the final Jellyfin-ready library.
+Disc Steward is a safe, observable control-plane service for a Barnabas-to-Eddy media pipeline. The recommended deployment runs Disc Steward on Gospel. Barnabas ingests and processes ripped discs with MakeMKV and FileFlows; Eddy stores the final Jellyfin-ready library and runs Jellyfin.
 
-The current version implements Phases 1-4 safety scaffolding: SQLite state, configurable paths, MKV scanning with `ffprobe`, rule-based classification, static HTML reports, an interactive local review UI, Jellyfin-style final path previews, FileFlows-ready work-order JSON with subtitle plans, FileFlows output validation on Barnabas, transfer to Eddy incoming storage, verified final placement, optional Jellyfin refresh, cleanup planning, dry-run cleanup execution, status reporting, metadata provider placeholders, and disabled-by-default Hermes/LLM suggestion hooks.
+The current version implements Phases 1-4 safety scaffolding: SQLite state on the controller, configurable path mappings, MKV scanning with `ffprobe`, rule-based classification, static HTML reports, an interactive local review UI, Jellyfin-style final path previews, FileFlows-ready work-order JSON with subtitle plans, FileFlows output validation through Gospel's Barnabas mount, transfer to Eddy incoming storage through Gospel's Eddy mount, verified final placement, optional Jellyfin refresh, cleanup planning, dry-run cleanup execution, status reporting, metadata provider placeholders, and disabled-by-default Hermes/LLM suggestion hooks.
 
 ## Workflow
 
 1. MakeMKV writes completed disc rips to Barnabas raw staging.
-2. Disc Steward scans each disc folder in place.
+2. Disc Steward runs on Gospel and scans each disc folder through Gospel's Barnabas mount.
 3. Scan metadata and classifications are stored in SQLite.
 4. Review decisions and metadata are entered in the local web UI.
-5. Approved jobs generate FileFlows work-order JSON in Barnabas `04_ready_for_fileflows`.
+5. Approved jobs generate FileFlows work-order JSON under Gospel's Barnabas mount, using Barnabas-native paths inside the JSON.
 6. FileFlows writes processed outputs back to Barnabas under each work order's `barnabas_validation_output_dir`.
 7. Disc Steward validates each output against the work order and source scan.
-8. Validated files are copied to Eddy `.incoming/disc-steward/job_<job_id>/`, verified, then moved into final Jellyfin library folders.
+8. Validated files are copied through Gospel's Eddy mount to Eddy `.incoming/disc-steward/job_<job_id>/`, verified, then moved into final Jellyfin library folders.
 9. If configured, Disc Steward asks Jellyfin to refresh after final placement.
 
 Raw rips stay on Barnabas. FileFlows outputs stay on Barnabas. Only final validated files are transferred to Eddy.
+
+## Recommended Hosts
+
+Use Gospel as the control-plane host:
+
+- Gospel runs Disc Steward, its SQLite database, review UI, reports, validation orchestration, and local-mount transfer/final placement logic.
+- Barnabas runs MakeMKV and FileFlows.
+- Eddy stores the final Jellyfin media library and runs/serves Jellyfin.
+
+In this deployment, Disc Steward config paths are controller paths: the paths Gospel uses to reach mounted Barnabas and Eddy filesystems. `path_mappings` translate those controller paths to the native paths that Barnabas/FileFlows and Eddy/Jellyfin use.
+
+```yaml
+pipeline_root: /mnt/Barnabas/data2/media-pipeline
+database_path: /var/lib/disc-steward/disc_steward.sqlite3
+
+paths:
+  raw_rip_path: /mnt/Barnabas/data2/media-pipeline/01_disc_rips_raw
+  fileflows_work_order_path: /mnt/Barnabas/data2/media-pipeline/04_ready_for_fileflows
+  validation_needed_path: /mnt/Barnabas/data2/media-pipeline/06_validation_needed
+
+path_mappings:
+  barnabas:
+    - controller_path: /mnt/Barnabas/data2/media-pipeline
+      barnabas_path: /mnt/data2/media-pipeline
+  eddy:
+    - controller_path: /mnt/Eddy/jellyfin-media
+      eddy_path: /mnt/jellyfin-media
+
+transfer:
+  method: local_mount
+  eddy_incoming_root: /mnt/Eddy/jellyfin-media/.incoming/disc-steward
+  eddy_final_roots:
+    Movies: /mnt/Eddy/jellyfin-media/Movies
+```
+
+With this setup, the scanner reads `controller_path` values, FileFlows work orders use Barnabas-native `source_path` and `barnabas_validation_output_dir`, and final library paths stored in work orders and validation/transfer records use Eddy-native paths. Missing mapped controller roots are treated as unavailable mounts rather than evidence that media was deleted.
 
 ## Install
 
@@ -84,7 +120,7 @@ and:
 - `preserve_ass_add_srt_fallback`
 - `manual_review`
 
-The review page previews intended Jellyfin-style final paths before any work orders are created. It sanitizes path components, preserves safe Unicode such as Japanese titles, formats metadata IDs in filenames, detects duplicate generated paths, and refuses existing final paths as conflicts.
+The review page previews intended Jellyfin-style final paths before any work orders are created. In Gospel deployments it shows controller paths for source files and Eddy/Jellyfin-native final destination previews, with Gospel final-placement paths shown when they differ. It sanitizes path components, preserves safe Unicode such as Japanese titles, formats metadata IDs in filenames, detects duplicate generated paths, and refuses existing final paths as conflicts.
 
 Review actions:
 
@@ -108,7 +144,7 @@ Approved work orders are written on Barnabas under:
     item_002.work_order.json
 ```
 
-Each item JSON references the original `source_path` in Barnabas raw rip storage, the chosen role/content type, metadata IDs, encoding profile, subtitle policy, Barnabas validation output directory, final intended Jellyfin library path, and preservation flags for original audio/subtitles.
+Each item JSON references the original `source_path` in Barnabas-native raw rip storage, the chosen role/content type, metadata IDs, encoding profile, subtitle policy, Barnabas-native validation output directory, Eddy/Jellyfin-native final intended library path, and preservation flags for original audio/subtitles.
 
 Each item also includes a `subtitle_plan` block. Disc Steward plans, but does not perform, risky subtitle replacement. Plans prefer UTF-8 SRT where practical, preserve originals by default, warn about default image subtitles, preserve ASS/SSA for anime or styled content, suggest SRT fallback for ASS when configured, tag forced-subtitle candidates for review, and mark generated subtitles as unverified. Image subtitle OCR and ASS fallback conversion are work-order instructions for FileFlows or future helper scripts.
 
@@ -154,14 +190,14 @@ Transfer only runs after validation passes or failed items are manually accepted
 /mnt/jellyfin-media/.incoming/disc-steward/job_<job_id>/
 ```
 
-Disc Steward verifies the incoming copy using `transfer.verify` (`size` by default, optionally `sha256` or `none`). Only after verification does it create final directories if configured and move files into their final Eddy library paths. Existing destination files are conflicts when `allow_overwrite: false`.
+Disc Steward verifies the incoming copy using `transfer.verify` (`size` by default, optionally `sha256` or `none`). Only after verification does it create final directories if configured and move files into their final Eddy library paths through Gospel's Eddy mount. Existing destination files are conflicts when `allow_overwrite: false`.
 
 Local mount configuration:
 
 ```yaml
 transfer:
   method: local_mount
-  eddy_incoming_root: /mnt/jellyfin-media/.incoming/disc-steward
+  eddy_incoming_root: /mnt/Eddy/jellyfin-media/.incoming/disc-steward
   verify: size
   allow_overwrite: false
   create_final_directories: true

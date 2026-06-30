@@ -189,6 +189,7 @@ class GeneratedPath:
     source_file_id: int
     final_path: Path
     output_name: str
+    controller_path: Path | None = None
     warnings: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
 

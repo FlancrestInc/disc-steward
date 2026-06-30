@@ -1,19 +1,30 @@
-pipeline_root: /mnt/data2/media-pipeline
-database_path: /mnt/data2/media-pipeline/disc_steward.sqlite3
+# Recommended deployment: run Disc Steward on Gospel.
+# Paths in pipeline_root, paths, and transfer roots are controller_path values:
+# the paths Gospel uses through its Barnabas and Eddy mounts.
+pipeline_root: /mnt/Barnabas/data2/media-pipeline
+database_path: /var/lib/disc-steward/disc_steward.sqlite3
 ffprobe_path: ffprobe
 ffmpeg_path: ffmpeg
 
 paths:
-  raw_rip_path: /mnt/data2/media-pipeline/01_disc_rips_raw
-  scan_complete_path: /mnt/data2/media-pipeline/02_scan_complete
-  review_needed_path: /mnt/data2/media-pipeline/03_review_needed
-  fileflows_work_order_path: /mnt/data2/media-pipeline/04_ready_for_fileflows
-  fileflows_working_path: /mnt/data2/media-pipeline/05_fileflows_working
-  validation_needed_path: /mnt/data2/media-pipeline/06_validation_needed
-  ready_for_eddy_path: /mnt/data2/media-pipeline/07_ready_for_eddy
-  transferred_to_eddy_path: /mnt/data2/media-pipeline/08_transferred_to_eddy
-  manual_review_path: /mnt/data2/media-pipeline/90_manual_review
-  failed_path: /mnt/data2/media-pipeline/99_failed
+  raw_rip_path: /mnt/Barnabas/data2/media-pipeline/01_disc_rips_raw
+  scan_complete_path: /mnt/Barnabas/data2/media-pipeline/02_scan_complete
+  review_needed_path: /mnt/Barnabas/data2/media-pipeline/03_review_needed
+  fileflows_work_order_path: /mnt/Barnabas/data2/media-pipeline/04_ready_for_fileflows
+  fileflows_working_path: /mnt/Barnabas/data2/media-pipeline/05_fileflows_working
+  validation_needed_path: /mnt/Barnabas/data2/media-pipeline/06_validation_needed
+  ready_for_eddy_path: /mnt/Barnabas/data2/media-pipeline/07_ready_for_eddy
+  transferred_to_eddy_path: /mnt/Barnabas/data2/media-pipeline/08_transferred_to_eddy
+  manual_review_path: /mnt/Barnabas/data2/media-pipeline/90_manual_review
+  failed_path: /mnt/Barnabas/data2/media-pipeline/99_failed
+
+path_mappings:
+  barnabas:
+    - controller_path: /mnt/Barnabas/data2/media-pipeline
+      barnabas_path: /mnt/data2/media-pipeline
+  eddy:
+    - controller_path: /mnt/Eddy/jellyfin-media
+      eddy_path: /mnt/jellyfin-media
 
 preferred_video_profile: universal_h264_aac_srt
 preferred_audio_fallback_codec: aac
@@ -59,12 +70,12 @@ validation:
 
 transfer:
   method: local_mount
-  eddy_incoming_root: /mnt/jellyfin-media/.incoming/disc-steward
+  eddy_incoming_root: /mnt/Eddy/jellyfin-media/.incoming/disc-steward
   eddy_final_roots:
-    Movies: /mnt/jellyfin-media/Movies
-    Shows: /mnt/jellyfin-media/Shows
-    Anime: /mnt/jellyfin-media/Anime
-    Family Videos: /mnt/jellyfin-media/Family Videos
+    Movies: /mnt/Eddy/jellyfin-media/Movies
+    Shows: /mnt/Eddy/jellyfin-media/Shows
+    Anime: /mnt/Eddy/jellyfin-media/Anime
+    Family Videos: /mnt/Eddy/jellyfin-media/Family Videos
   rsync_target:
   ssh_options: []
   verify: size

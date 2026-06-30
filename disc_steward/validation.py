@@ -78,7 +78,7 @@ def validate_job_outputs(
             subtitle_policy=payload.get("subtitle_policy") or "",
         )
         source = _source_from_row(source_rows[source_id])
-        output_dir = Path(payload.get("barnabas_validation_output_dir") or config.validation_needed_path / f"job_{job_id}")
+        output_dir = _controller_validation_output_dir(config, payload, job_id)
         output_path, match_warnings = _match_output(output_dir, item.expected_output_name, source_id, payload)
         item.warnings.extend(match_warnings)
         if output_path is None:
@@ -94,7 +94,7 @@ def validate_job_outputs(
         item.status = "passed" if not item.errors else "failed"
         items.append(item)
 
-    for output_dir in {Path(payload.get("barnabas_validation_output_dir") or config.validation_needed_path / f"job_{job_id}") for payload in work_orders}:
+    for output_dir in {_controller_validation_output_dir(config, payload, job_id) for payload in work_orders}:
         for extra in sorted(output_dir.glob("*.mkv")) if output_dir.exists() else []:
             if str(extra) not in matched_paths:
                 warnings.append(f"unmatched FileFlows output: {extra}")
@@ -111,6 +111,13 @@ def validate_job_outputs(
         {"warnings": warnings},
     )
     return summary
+
+
+def _controller_validation_output_dir(config: AppConfig, payload: dict, job_id: int) -> Path:
+    value = payload.get("barnabas_validation_output_dir")
+    if value:
+        return config.to_controller_path(Path(value), "barnabas")
+    return config.validation_needed_path / f"job_{job_id}"
 
 
 def _match_output(output_dir: Path, expected_name: str, source_file_id: int, payload: dict) -> tuple[Path | None, list[str]]:

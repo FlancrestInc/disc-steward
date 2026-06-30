@@ -18,7 +18,7 @@ def plan_cleanup(db, config: AppConfig) -> CleanupPlanSummary:
         validation = db.latest_validation_summary(job.id)
         transfer = db.latest_transfer_summary(job.id)
         hold = db.has_cleanup_hold(job.id)
-        final_success = _final_success(job.status, validation, transfer)
+        final_success = _final_success(config, job.status, validation, transfer)
         source_rows = db.source_file_payloads(job.id)
         for row in source_rows:
             raw_path = Path(row["path"])
@@ -32,6 +32,7 @@ def plan_cleanup(db, config: AppConfig) -> CleanupPlanSummary:
                 hold,
                 config.cleanup.raw_rip_retention_days_after_import,
                 _archive_path(config, raw_path) if config.cleanup.archive_raw_rips_to_eddy else None,
+                config,
             )
         for item in (validation or {}).get("items", []):
             matched = item.get("matched_output_path")
@@ -47,6 +48,7 @@ def plan_cleanup(db, config: AppConfig) -> CleanupPlanSummary:
                 hold,
                 config.cleanup.working_file_retention_days_after_import,
                 None,
+                config,
             )
     db.replace_cleanup_eligibility([asdict(item) for item in [*summary.eligible, *summary.ineligible]])
     return summary
@@ -99,8 +101,9 @@ def _add_candidate(
     hold: bool,
     retention_days: int,
     archive_path: Path | None,
+    config: AppConfig,
 ) -> None:
-    eligible, reason = _eligibility(path, action_configured, final_success, hold, retention_days)
+    eligible, reason = _eligibility(config, path, action_configured, final_success, hold, retention_days)
     item = CleanupEligibilityItem(
         job_id=job_id,
         path=str(path),
@@ -112,13 +115,16 @@ def _add_candidate(
     (summary.eligible if eligible else summary.ineligible).append(item)
 
 
-def _eligibility(path: Path, action_configured: bool, final_success: bool, hold: bool, retention_days: int) -> tuple[bool, str]:
+def _eligibility(config: AppConfig, path: Path, action_configured: bool, final_success: bool, hold: bool, retention_days: int) -> tuple[bool, str]:
     if hold:
         return False, "job is on cleanup hold"
     if not final_success:
         return False, "job has not completed final import, validation, and transfer"
     if not action_configured:
         return False, "cleanup action is not enabled for this item type"
+    unavailable = config.mount_unavailable_for(path)
+    if unavailable is not None:
+        return False, f"mount unavailable: {unavailable}"
     if not path.exists():
         return False, "path does not exist"
     age_days = (time.time() - path.stat().st_mtime) / 86400
@@ -127,7 +133,7 @@ def _eligibility(path: Path, action_configured: bool, final_success: bool, hold:
     return True, "validated, transferred, final path exists, and retention elapsed"
 
 
-def _final_success(job_status: str, validation: dict | None, transfer: dict | None) -> bool:
+def _final_success(config: AppConfig, job_status: str, validation: dict | None, transfer: dict | None) -> bool:
     if job_status not in FINAL_SUCCESS_STATUSES:
         return False
     if not validation or validation.get("passed") is not True:
@@ -136,7 +142,11 @@ def _final_success(job_status: str, validation: dict | None, transfer: dict | No
         return False
     for item in transfer.get("items", []):
         final_path = item.get("final_path")
-        if not final_path or not Path(final_path).exists():
+        if not final_path:
+            return False
+        controller_final_path = config.to_controller_path(Path(final_path), "eddy")
+        unavailable = config.mount_unavailable_for(controller_final_path)
+        if unavailable is not None or not controller_final_path.exists():
             return False
         if item.get("status") not in {"placed", "imported"}:
             return False
