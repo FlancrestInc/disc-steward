@@ -1,0 +1,47 @@
+pipeline_root: /mnt/data2/media-pipeline
+database_path: /mnt/data2/media-pipeline/disc_steward.sqlite3
+ffprobe_path: ffprobe
+ffmpeg_path: ffmpeg
+
+paths:
+  raw_rip_path: /mnt/data2/media-pipeline/01_disc_rips_raw
+  scan_complete_path: /mnt/data2/media-pipeline/02_scan_complete
+  review_needed_path: /mnt/data2/media-pipeline/03_review_needed
+  fileflows_work_order_path: /mnt/data2/media-pipeline/04_ready_for_fileflows
+  fileflows_working_path: /mnt/data2/media-pipeline/05_fileflows_working
+  validation_needed_path: /mnt/data2/media-pipeline/06_validation_needed
+  ready_for_eddy_path: /mnt/data2/media-pipeline/07_ready_for_eddy
+  transferred_to_eddy_path: /mnt/data2/media-pipeline/08_transferred_to_eddy
+  manual_review_path: /mnt/data2/media-pipeline/90_manual_review
+  failed_path: /mnt/data2/media-pipeline/99_failed
+
+eddy:
+  incoming_path: /mnt/jellyfin-media/.incoming
+  library_roots:
+    Movies: /mnt/jellyfin-media/Movies
+    Shows: /mnt/jellyfin-media/Shows
+    Anime: /mnt/jellyfin-media/Anime
+    Family Videos: /mnt/jellyfin-media/Family Videos
+
+transfer_method: local_mount
+rsync_destination:
+preferred_video_profile: universal_h264_aac_srt
+preferred_audio_fallback_codec: aac
+preferred_subtitle_format: srt
+minimum_title_duration_seconds: 30
+duration_tolerance_seconds: 5
+cleanup_enabled: false
+raw_rip_retention_days: 30
+working_file_retention_days: 14
+overwrite_existing: false
+dry_run: true
+
+jellyfin:
+  base_url:
+  api_key:
+  refresh_enabled: false
+  library_ids: []
+
+llm:
+  enabled: false
+  provider: hermes

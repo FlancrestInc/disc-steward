@@ -1,0 +1,31 @@
+{
+  "format": {
+    "filename": "/media/raw/SPIRITED_AWAY/title_t04.mkv",
+    "format_name": "matroska,webm",
+    "duration": "420.000000",
+    "size": "600000000"
+  },
+  "chapters": [],
+  "streams": [
+    {
+      "index": 0,
+      "codec_type": "video",
+      "codec_name": "h264",
+      "profile": "High",
+      "pix_fmt": "yuv420p",
+      "width": 1920,
+      "height": 1080,
+      "avg_frame_rate": "30000/1001",
+      "r_frame_rate": "30000/1001",
+      "bits_per_raw_sample": "8"
+    },
+    {
+      "index": 1,
+      "codec_type": "audio",
+      "codec_name": "ac3",
+      "channels": 2,
+      "disposition": {"default": 1, "forced": 0},
+      "tags": {"language": "und"}
+    }
+  ]
+}

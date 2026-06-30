@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "disc-steward"
+version = "0.1.0"
+description = "Safe control-plane service for homelab disc ripping, review, and media pipeline handoff."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "PyYAML>=6.0.1"
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0"
+]
+
+[project.scripts]
+disc-steward = "disc_steward.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["disc_steward*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

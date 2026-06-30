@@ -1,0 +1,68 @@
+{
+  "format": {
+    "filename": "/media/raw/SPIRITED_AWAY/title_t00.mkv",
+    "format_name": "matroska,webm",
+    "duration": "7500.500000",
+    "size": "42000000000",
+    "tags": {
+      "title": "Spirited Away",
+      "MAKEMKV_TITLE": "title_t00"
+    }
+  },
+  "chapters": [
+    {"id": 0},
+    {"id": 1}
+  ],
+  "streams": [
+    {
+      "index": 0,
+      "codec_type": "video",
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "pix_fmt": "yuv420p10le",
+      "width": 1920,
+      "height": 1080,
+      "avg_frame_rate": "24000/1001",
+      "r_frame_rate": "24000/1001",
+      "bits_per_raw_sample": "10",
+      "tags": {
+        "DURATION": "02:05:00.500000000"
+      },
+      "side_data_list": [
+        {"side_data_type": "Mastering display metadata"}
+      ]
+    },
+    {
+      "index": 1,
+      "codec_type": "audio",
+      "codec_name": "truehd",
+      "channels": 6,
+      "channel_layout": "5.1",
+      "disposition": {"default": 1, "forced": 0},
+      "tags": {"language": "jpn", "title": "Japanese TrueHD 5.1"}
+    },
+    {
+      "index": 2,
+      "codec_type": "audio",
+      "codec_name": "aac",
+      "channels": 2,
+      "channel_layout": "stereo",
+      "disposition": {"default": 0, "forced": 0},
+      "tags": {"language": "eng", "title": "English AAC"}
+    },
+    {
+      "index": 3,
+      "codec_type": "subtitle",
+      "codec_name": "hdmv_pgs_subtitle",
+      "disposition": {"default": 1, "forced": 0},
+      "tags": {"language": "eng", "title": "English SDH"}
+    },
+    {
+      "index": 4,
+      "codec_type": "subtitle",
+      "codec_name": "ass",
+      "disposition": {"default": 0, "forced": 1},
+      "tags": {"language": "jpn", "title": "Signs & Songs Forced"}
+    }
+  ]
+}
