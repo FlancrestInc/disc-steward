@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""Conservative SRT parseability check."""
+
+from __future__ import annotations
+
+import argparse
+import re
+from pathlib import Path
+
+TIMESTAMP_RE = re.compile(r"\d\d:\d\d:\d\d,\d{3}\s+-->\s+\d\d:\d\d:\d\d,\d{3}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("srt_path")
+    args = parser.parse_args()
+    text = Path(args.srt_path).read_text(encoding="utf-8-sig")
+    if not TIMESTAMP_RE.search(text):
+        print("warning: no SRT timestamp lines detected")
+        return 1
+    print("ok")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -131,6 +131,13 @@ class JobReviewMetadata:
     job_id: int
     title: str = ""
     original_title: str | None = None
+    romanized_title: str | None = None
+    translated_title: str | None = None
+    language_script_hints: str | None = None
+    anime_flag: bool = False
+    japanese_media_flag: bool = False
+    confidence: float | None = None
+    manual_review_notes: str | None = None
     year: int | None = None
     content_type: str = "unknown"
     library_root: str = "Movies"
@@ -194,9 +201,53 @@ class SubtitlePolicySuggestion:
 
 
 @dataclass
+class SubtitlePlan:
+    policy: str
+    preferred_format: str = "srt"
+    preserve_original_subtitles: bool = True
+    image_subtitles_detected: bool = False
+    image_subtitles_default: bool = False
+    text_subtitles_detected: bool = False
+    ass_subtitles_detected: bool = False
+    forced_subtitle_candidates: list[dict[str, Any]] = field(default_factory=list)
+    statuses: list[str] = field(default_factory=list)
+    actions: list[dict[str, Any]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    japanese_or_anime: bool = False
+    generated_subtitles_unverified: bool = False
+
+
+@dataclass
 class ValidationResult:
     passed: bool
     issues: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class OutputValidationItem:
+    source_file_id: int
+    expected_output_name: str
+    expected_final_path: str
+    profile: str
+    subtitle_policy: str
+    matched_output_path: str | None = None
+    status: str = "pending"
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    ffprobe_summary: dict[str, Any] = field(default_factory=dict)
+    detected_streams: dict[str, Any] = field(default_factory=dict)
+    profile_compliance: dict[str, str] = field(default_factory=dict)
+    manually_accepted: bool = False
+    manual_acceptance_note: str | None = None
+
+
+@dataclass
+class JobValidationSummary:
+    job_id: int
+    status: str
+    passed: bool
+    items: list[OutputValidationItem] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -205,3 +256,43 @@ class TransferConflict:
     conflict: bool
     path: Path
     reason: str | None = None
+
+
+@dataclass
+class TransferItemResult:
+    source_file_id: int
+    source_output_path: str
+    incoming_path: str
+    final_path: str
+    status: str = "pending"
+    verification: str = "size"
+    conflict: str | None = None
+    error: str | None = None
+
+
+@dataclass
+class TransferSummary:
+    job_id: int
+    status: str
+    items: list[TransferItemResult] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CleanupEligibilityItem:
+    job_id: int
+    path: str
+    item_type: str
+    eligible: bool
+    reason: str
+    archive_path: str | None = None
+
+
+@dataclass
+class CleanupPlanSummary:
+    eligible: list[CleanupEligibilityItem] = field(default_factory=list)
+    ineligible: list[CleanupEligibilityItem] = field(default_factory=list)
+    dry_run: bool = True
+    deleted: list[str] = field(default_factory=list)
+    archived: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)

@@ -7,7 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import AppConfig
-from .models import FileReviewDecision, GeneratedPath, JobReviewMetadata, ReviewDecision
+from .models import AudioStream, FileReviewDecision, GeneratedPath, JobReviewMetadata, ReviewDecision, ScannedFile, SubtitleStream, VideoInfo
+from .subtitle_planner import generate_subtitle_plan, plan_to_dict
 
 
 INVALID_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -182,8 +183,29 @@ def build_fileflows_item_payload(
     source_path: Path,
     job: JobReviewMetadata,
     decision: FileReviewDecision,
+    source: ScannedFile | None = None,
 ) -> dict:
     final_path = Path(decision.generated_final_path) if decision.generated_final_path else _build_path_for_file(config, job, decision)
+    subtitle_plan = (
+        plan_to_dict(
+            generate_subtitle_plan(
+                source,
+                content_type=decision.content_type or job.content_type,
+                subtitle_policy=decision.subtitle_policy,
+                preferred_format=config.subtitle_planning.preferred_format,
+                preserve_original_subtitles=config.subtitle_planning.preserve_original_subtitles,
+            )
+        )
+        if source is not None
+        else {
+            "policy": decision.subtitle_policy,
+            "preferred_format": config.preferred_subtitle_format,
+            "preserve_original_subtitles": True,
+            "statuses": ["manual_review_required"],
+            "actions": [],
+            "warnings": ["source stream details were unavailable when the subtitle plan was generated"],
+        }
+    )
     return {
         "job_id": job_id,
         "item_id": item_id,
@@ -198,6 +220,7 @@ def build_fileflows_item_payload(
         "metadata_ids": _metadata_ids(job, decision),
         "profile": decision.encoding_profile,
         "subtitle_policy": decision.subtitle_policy,
+        "subtitle_plan": subtitle_plan,
         "output_name": final_path.name,
         "barnabas_validation_output_dir": str(config.validation_needed_path / f"job_{job_id}"),
         "final_library_path": str(final_path),
@@ -277,10 +300,12 @@ def create_fileflows_work_orders(db, config: AppConfig, job_id: int) -> Path:
             Path(row["path"]),
             job_review,
             decision,
+            _source_from_row(row),
         )
         item_path = items_dir / f"item_{index:03d}.work_order.json"
         item_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         db.save_work_order_record(job_id, decision.source_file_id, str(item_path), payload)
+        db.save_subtitle_plan(decision.source_file_id, payload["subtitle_plan"])
         item_paths.append(item_path)
         warnings.extend(decision.warnings)
 
@@ -299,9 +324,28 @@ def create_fileflows_work_orders(db, config: AppConfig, job_id: int) -> Path:
         "warnings": [*job_review.warnings, *warnings],
         "notes": job_review.notes,
         "items": [str(path) for path in item_paths],
-        "todo": "Future Phase 2/3 extension point: call FileFlows API or expose this folder to a watched-folder script.",
+        "todo": "Expose this folder to FileFlows or a reviewed watched-folder script; Disc Steward does not call FileFlows directly.",
     }
     (job_dir / "job_manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     db.mark_work_orders_created(job_id, str(job_dir), created)
     db.audit("work_orders_created", f"Created {len(item_paths)} FileFlows work order(s)", job_id, {"folder": str(job_dir)})
     return job_dir
+
+
+def _source_from_row(row: dict) -> ScannedFile:
+    return ScannedFile(
+        path=row["path"],
+        filename=row["filename"],
+        parent_disc_folder=row["parent_disc_folder"],
+        size_bytes=row["size_bytes"],
+        modified_time=row["modified_time"],
+        duration_seconds=row["duration_seconds"],
+        container_format=row["container_format"],
+        video=VideoInfo(**json.loads(row["video_json"] or "{}")),
+        audio_streams=[AudioStream(**stream) for stream in json.loads(row["audio_json"] or "[]")],
+        subtitle_streams=[SubtitleStream(**stream) for stream in json.loads(row["subtitle_json"] or "[]")],
+        chapter_count=row["chapter_count"],
+        embedded_title=row["embedded_title"],
+        makemkv_title=row["makemkv_title"],
+        raw_ffprobe=json.loads(row["raw_ffprobe_json"] or "{}"),
+    )

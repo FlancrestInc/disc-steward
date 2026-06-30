@@ -15,19 +15,23 @@ paths:
   manual_review_path: /mnt/data2/media-pipeline/90_manual_review
   failed_path: /mnt/data2/media-pipeline/99_failed
 
-eddy:
-  incoming_path: /mnt/jellyfin-media/.incoming
-  library_roots:
-    Movies: /mnt/jellyfin-media/Movies
-    Shows: /mnt/jellyfin-media/Shows
-    Anime: /mnt/jellyfin-media/Anime
-    Family Videos: /mnt/jellyfin-media/Family Videos
-
-transfer_method: local_mount
-rsync_destination:
 preferred_video_profile: universal_h264_aac_srt
 preferred_audio_fallback_codec: aac
 preferred_subtitle_format: srt
+subtitle_planning:
+  preferred_format: srt
+  preserve_original_subtitles: true
+  convert_image_subtitles_to_srt: false
+  preserve_ass_for_anime: true
+  add_srt_fallback_for_ass: true
+
+japanese_anime:
+  preserve_unicode_metadata: true
+  english_filename_with_original_metadata: true
+  allow_original_title_in_filename: false
+  preserve_ass_by_default: true
+  auto_translate_metadata: false
+
 encoding_profiles:
   - remux_only
   - universal_h264_aac_srt
@@ -42,19 +46,80 @@ subtitle_policies:
   - preserve_ass_add_srt_fallback
   - manual_review
 minimum_title_duration_seconds: 30
-duration_tolerance_seconds: 5
-cleanup_enabled: false
 raw_rip_retention_days: 30
 working_file_retention_days: 14
-overwrite_existing: false
 dry_run: true
 
+validation:
+  duration_tolerance_seconds: 3
+  duration_tolerance_percent: 1.0
+  require_aac_fallback: true
+  require_no_default_image_subtitles: true
+  allow_manual_acceptance: true
+
+transfer:
+  method: local_mount
+  eddy_incoming_root: /mnt/jellyfin-media/.incoming/disc-steward
+  eddy_final_roots:
+    Movies: /mnt/jellyfin-media/Movies
+    Shows: /mnt/jellyfin-media/Shows
+    Anime: /mnt/jellyfin-media/Anime
+    Family Videos: /mnt/jellyfin-media/Family Videos
+  rsync_target:
+  ssh_options: []
+  verify: size
+  allow_overwrite: false
+  create_final_directories: true
+
 jellyfin:
-  base_url:
-  api_key:
-  refresh_enabled: false
+  enabled: false
+  base_url: http://eddy:8096
+  api_key: ""
+  refresh_after_import: false
   library_ids: []
+
+cleanup:
+  enabled: false
+  dry_run: true
+  raw_rip_retention_days_after_import: 14
+  working_file_retention_days_after_import: 7
+  delete_raw_rips: false
+  delete_working_files: false
+  archive_raw_rips_to_eddy: false
+  raw_rip_archive_path: ""
+  require_successful_jellyfin_import: true
+
+metadata:
+  enabled: false
+  providers:
+    tmdb:
+      enabled: false
+      api_key: ""
+    tvdb:
+      enabled: false
+      api_key: ""
+    anilist:
+      enabled: false
+    anidb:
+      enabled: false
+      api_key: ""
+    mal:
+      enabled: false
+      api_key: ""
 
 llm:
   enabled: false
   provider: hermes
+  endpoint: ""
+  max_items_per_request: 10
+  max_chars_per_field: 500
+  allow_full_subtitle_text: false
+  allow_shell_commands: false
+
+jellyfin_logs:
+  enabled: false
+  log_path: ""
+  scan_recent_days: 7
+
+dashboard:
+  enabled: true

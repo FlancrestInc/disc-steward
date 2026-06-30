@@ -4,10 +4,14 @@ import argparse
 import logging
 
 from .config import load_config
+from .cleanup import execute_cleanup, plan_cleanup
 from .db import Database
 from .reports import generate_reports
 from .scanner import scan_completed_rips
+from .status import build_status_summary, format_status_summary
+from .transfer import transfer_job_to_eddy
 from .utils import configure_logging
+from .validation import validate_job_outputs
 from .web import serve_review_ui
 from .work_orders import create_fileflows_work_orders
 
@@ -31,7 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--job-id", type=int, required=True)
     transfer = sub.add_parser("transfer", parents=[shared], help="Transfer validated output to Eddy")
     transfer.add_argument("--job-id", type=int, required=True)
-    sub.add_parser("cleanup", parents=[shared], help="Evaluate cleanup eligibility; deletion disabled by default")
+    sub.add_parser("cleanup-plan", parents=[shared], help="Plan cleanup eligibility without changing files")
+    sub.add_parser("cleanup", parents=[shared], help="Execute configured cleanup; disabled and dry-run by default")
+    sub.add_parser("status", parents=[shared], help="Show pipeline status summary")
     return parser
 
 
@@ -59,17 +65,48 @@ def main(argv: list[str] | None = None) -> int:
         print(folder)
         return 0
     if args.command == "validate":
-        LOG.warning("validate is scaffolded for manual invocation in Phase 3")
-        return 2
+        summary = validate_job_outputs(db, config, args.job_id)
+        print(f"{summary.status}: {len(summary.items)} item(s)")
+        for item in summary.items:
+            print(f"{item.source_file_id}: {item.status} {item.matched_output_path or item.expected_output_name}")
+            for warning in item.warnings:
+                print(f"  warning: {warning}")
+            for error in item.errors:
+                print(f"  error: {error}")
+        for warning in summary.warnings:
+            print(f"warning: {warning}")
+        return 0 if summary.passed else 2
     if args.command == "transfer":
-        LOG.warning("transfer is scaffolded and dry-run guarded for Phase 3")
-        return 2
+        summary = transfer_job_to_eddy(db, config, args.job_id)
+        print(f"{summary.status}: {len(summary.items)} item(s)")
+        for item in summary.items:
+            print(f"{item.source_file_id}: {item.status} -> {item.final_path}")
+            if item.conflict:
+                print(f"  conflict: {item.conflict}")
+            if item.error:
+                print(f"  error: {item.error}")
+        for warning in summary.warnings:
+            print(f"warning: {warning}")
+        return 0 if summary.status == "imported_to_jellyfin" else 2
+    if args.command == "cleanup-plan":
+        summary = plan_cleanup(db, config)
+        print(f"eligible: {len(summary.eligible)}")
+        for item in summary.eligible:
+            suffix = f" -> archive {item.archive_path}" if item.archive_path else ""
+            print(f"  {item.item_type}: {item.path} ({item.reason}){suffix}")
+        print(f"ineligible: {len(summary.ineligible)}")
+        for item in summary.ineligible:
+            print(f"  {item.item_type}: {item.path} ({item.reason})")
+        return 0
     if args.command == "cleanup":
-        if not config.cleanup_enabled:
-            LOG.info("cleanup disabled; no files will be deleted")
-            return 0
-        LOG.warning("cleanup automation is not implemented in Phase 1")
-        return 2
+        summary = execute_cleanup(db, config)
+        print(f"cleanup {'dry-run' if summary.dry_run else 'live'}: deleted={len(summary.deleted)} archived={len(summary.archived)} errors={len(summary.errors)}")
+        for error in summary.errors:
+            print(f"error: {error}")
+        return 0 if not summary.errors or config.cleanup.dry_run else 2
+    if args.command == "status":
+        print(format_status_summary(build_status_summary(db, config)))
+        return 0
     return 1
 
 

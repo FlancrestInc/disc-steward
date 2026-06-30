@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""Safe scaffold for extracting subtitle streams for review/OCR workflows.
+
+This Phase 4 helper is intentionally non-destructive. It does not replace,
+delete, or rewrite media files. Wire FileFlows or a future wrapper to call
+ffmpeg with explicit stream indexes after a human-reviewed subtitle plan exists.
+"""
+
+from __future__ import annotations
+
+import argparse
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("media_path")
+    parser.add_argument("--stream-index", type=int, required=True)
+    parser.add_argument("--output")
+    args = parser.parse_args()
+    print(f"planned extraction only: {args.media_path} stream {args.stream_index} -> {args.output or '(not set)'}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -8,9 +8,16 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .config import AppConfig
+from .cleanup import plan_cleanup
 from .db import Database
-from .models import Classification, FileReviewDecision, JobReviewMetadata
+from .llm import request_suggestions
+from .metadata import metadata_provider_status
+from .models import AudioStream, Classification, FileReviewDecision, JobReviewMetadata, ScannedFile, SubtitleStream, VideoInfo
 from .review import ReviewValidationError, classification_from_json, suggest_subtitle_policy, validate_review_ready
+from .status import build_status_summary, format_status_summary
+from .subtitle_planner import generate_subtitle_plan
+from .transfer import transfer_job_to_eddy
+from .validation import validate_job_outputs
 from .work_orders import create_fileflows_work_orders, generate_final_paths
 
 
@@ -60,7 +67,7 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path in {"", "/"}:
-            self._send_html(render_job_list(self.database))
+            self._send_html(render_job_list(self.database, self.app_config))
             return
         if path.startswith("/jobs/"):
             job_id = _job_id_from_path(path)
@@ -155,6 +162,64 @@ def handle_job_action(db: Database, config: AppConfig, job_id: int, action: str,
         db.save_job_review(review)
         db.audit("manual_review", "Sent job to manual review", job_id)
         return "manual-review"
+    if action == "validate":
+        summary = validate_job_outputs(db, config, job_id)
+        return summary.status
+    if action == "transfer":
+        summary = transfer_job_to_eddy(db, config, job_id)
+        return summary.status
+    if action == "cleanup-plan":
+        summary = plan_cleanup(db, config)
+        return f"cleanup-plan:{len(summary.eligible)}-eligible"
+    if action == "cleanup-hold":
+        db.set_cleanup_hold(job_id, True, form.get("cleanup_hold_reason", "manual hold"))
+        return "cleanup-hold-set"
+    if action == "remove-cleanup-hold":
+        db.set_cleanup_hold(job_id, False, "manual hold removed")
+        return "cleanup-hold-removed"
+    if action == "llm-suggestions":
+        result = request_suggestions(db, config, job_id)
+        return f"llm-suggestions:{len(result.get('suggestions', []))}"
+    if action == "generate-subtitle-plans":
+        decisions = {decision.source_file_id: decision for decision in db.list_file_reviews(job_id)}
+        count = 0
+        for row in db.source_file_payloads(job_id):
+            decision = decisions.get(row["id"]) or FileReviewDecision(source_file_id=row["id"])
+            audio = json.loads(row["audio_json"] or "[]")
+            subtitles = json.loads(row["subtitle_json"] or "[]")
+            source = _source_for_plan(row, audio, subtitles)
+            plan = generate_subtitle_plan(source, decision.content_type, decision.subtitle_policy or "manual_review")
+            db.save_subtitle_plan(row["id"], plan.__dict__)
+            count += 1
+        db.audit("subtitle_plans_generated", f"Generated {count} subtitle plan(s)", job_id)
+        return f"subtitle-plans:{count}"
+    if action == "manual-accept-output":
+        if not config.validation_allow_manual_acceptance:
+            raise ValueError("Manual validation acceptance is disabled in config")
+        note = form.get("manual_acceptance_note", "").strip()
+        source_file_id = int(form.get("source_file_id", "0"))
+        if not note:
+            raise ValueError("Manual acceptance requires a note")
+        summary = db.latest_validation_summary(job_id)
+        if not summary:
+            raise ValueError("No validation result exists for this job")
+        for item in summary.get("items", []):
+            if int(item["source_file_id"]) == source_file_id:
+                item["manually_accepted"] = True
+                item["manual_acceptance_note"] = note
+                item["status"] = "passed"
+                item.setdefault("warnings", []).append(f"manually accepted: {note}")
+                break
+        else:
+            raise ValueError(f"Unknown output source id: {source_file_id}")
+        passed = all(item.get("status") == "passed" or item.get("manually_accepted") for item in summary.get("items", []))
+        summary["passed"] = passed
+        summary["status"] = "validated" if passed else "validation_failed"
+        db.save_manual_override(job_id, source_file_id, "validation_acceptance", note)
+        db.save_validation_summary(job_id, summary, passed)
+        db.update_job_status(job_id, "transfer_ready" if passed else "validation_failed")
+        db.audit("manual_output_acceptance", "Manually accepted validation output", job_id, {"source_file_id": source_file_id, "note": note})
+        return "manual-output-accepted"
     if action == "reopen":
         review = db.get_job_review(job_id)
         review.review_status = "review_in_progress"
@@ -183,6 +248,11 @@ def parse_review_form(
         job_id=job_id,
         title=text("title") or "",
         original_title=text("original_title"),
+        romanized_title=text("romanized_title"),
+        translated_title=text("translated_title"),
+        language_script_hints=text("language_script_hints"),
+        anime_flag=form.get("anime_flag") == "on",
+        japanese_media_flag=form.get("japanese_media_flag") == "on",
         year=integer("year"),
         content_type=text("content_type") or "unknown",
         library_root=text("library_root") or "Movies",
@@ -207,9 +277,9 @@ def parse_review_form(
                 content_type=text(prefix + "content_type") or job_review.content_type,
                 final_display_name=text(prefix + "final_display_name"),
                 final_filename=text(prefix + "final_filename"),
-                original_title=text(prefix + "original_title"),
-                translated_title=text(prefix + "translated_title"),
-                romanized_title=text(prefix + "romanized_title"),
+        original_title=text(prefix + "original_title"),
+        translated_title=text(prefix + "translated_title"),
+        romanized_title=text(prefix + "romanized_title"),
                 imdb_id=text(prefix + "imdb_id"),
                 tmdb_id=text(prefix + "tmdb_id"),
                 tvdb_id=text(prefix + "tvdb_id"),
@@ -228,7 +298,7 @@ def parse_review_form(
     return job_review, decisions
 
 
-def render_job_list(db: Database) -> str:
+def render_job_list(db: Database, config: AppConfig) -> str:
     rows = db.list_job_summaries()
     table_rows = "\n".join(
         f"""
@@ -250,6 +320,7 @@ def render_job_list(db: Database) -> str:
         "Disc Steward Review",
         f"""
         <h1>Disc Steward Review</h1>
+        {render_dashboard(db, config)}
         <table>
           <thead>
             <tr>
@@ -305,6 +376,8 @@ def render_job_review(
             <button formaction="/jobs/{job_id}/reopen">Reopen review</button>
           </div>
         </form>
+        {render_phase3_sections(db, job_id)}
+        {render_phase4_sections(db, config, job_id)}
         """,
     )
 
@@ -380,11 +453,17 @@ def _group_for(classification: Classification) -> str:
 
 
 def render_job_fields(config: AppConfig, review: JobReviewMetadata) -> str:
+    metadata_status = metadata_provider_status(config.metadata)
     return f"""
     <fieldset>
       <legend>Disc Metadata</legend>
       <label>Title <input name="title" value="{escape(review.title)}"></label>
       <label>Original title <input name="original_title" value="{escape(review.original_title or '')}"></label>
+      <label>Romanized title <input name="romanized_title" value="{escape(review.romanized_title or '')}"></label>
+      <label>Translated title <input name="translated_title" value="{escape(review.translated_title or '')}"></label>
+      <label>Language/script hints <input name="language_script_hints" value="{escape(review.language_script_hints or '')}"></label>
+      <label><input type="checkbox" name="anime_flag" {"checked" if review.anime_flag else ""}> Anime</label>
+      <label><input type="checkbox" name="japanese_media_flag" {"checked" if review.japanese_media_flag else ""}> Japanese media</label>
       <label>Year <input name="year" value="{escape(str(review.year or ''))}" inputmode="numeric"></label>
       <label>Content type {select("content_type", CONTENT_TYPES, review.content_type)}</label>
       <label>Library root {select("library_root", list(config.eddy_library_roots.keys()) or LIBRARY_ROOTS, review.library_root)}</label>
@@ -394,6 +473,7 @@ def render_job_fields(config: AppConfig, review: JobReviewMetadata) -> str:
       <label>AniDB ID <input name="anidb_id" value="{escape(review.anidb_id or '')}"></label>
       <label>AniList ID <input name="anilist_id" value="{escape(review.anilist_id or '')}"></label>
       <label>MAL ID <input name="mal_id" value="{escape(review.mal_id or '')}"></label>
+      <p class="wide muted">Metadata lookup: {'enabled' if metadata_status['enabled'] else 'disabled'} · LLM/Hermes: {'enabled' if config.llm.enabled else 'disabled'}</p>
       <label class="wide">Notes <textarea name="notes">{escape(review.notes or '')}</textarea></label>
     </fieldset>
     """
@@ -406,6 +486,8 @@ def render_file_card(config: AppConfig, row: dict, decision: FileReviewDecision,
     video = json.loads(row["video_json"] or "{}")
     audio = json.loads(row["audio_json"] or "[]")
     subtitles = json.loads(row["subtitle_json"] or "[]")
+    source_for_plan = _source_for_plan(row, audio, subtitles)
+    subtitle_plan = generate_subtitle_plan(source_for_plan, decision.content_type, decision.subtitle_policy)
     issues = _issues(classification)
     final_path = escape(str(generated.final_path)) if generated else ""
     conflicts = generated.conflicts if generated else []
@@ -425,6 +507,9 @@ def render_file_card(config: AppConfig, row: dict, decision: FileReviewDecision,
       </div>
       <p><strong>Reasons:</strong> {escape('; '.join(classification.reasons) or 'None recorded')}</p>
       <p><strong>Issues:</strong> {escape('; '.join(issues) or 'None detected')}</p>
+      {"<p class='errors'>Japanese/anime content detected. Review title and subtitle handling.</p>" if subtitle_plan.japanese_or_anime else ""}
+      <p><strong>Subtitle plan:</strong> {escape(', '.join(subtitle_plan.statuses))}</p>
+      {"<p class='errors'>" + escape('; '.join(subtitle_plan.warnings)) + "</p>" if subtitle_plan.warnings else ""}
       <p><strong>Final path preview:</strong> <code>{final_path}</code></p>
       {"<p class='errors'>" + escape('; '.join(conflicts)) + "</p>" if conflicts else ""}
       <div class="file-fields">
@@ -451,6 +536,147 @@ def render_file_card(config: AppConfig, row: dict, decision: FileReviewDecision,
         <label class="wide">Notes <textarea name="{prefix}notes">{escape(decision.notes or '')}</textarea></label>
       </div>
     </article>
+    """
+
+
+def render_phase3_sections(db: Database, job_id: int) -> str:
+    validation = db.latest_validation_summary(job_id)
+    transfer = db.latest_transfer_summary(job_id)
+    validation_html = render_validation_section(job_id, validation)
+    transfer_html = render_transfer_section(job_id, validation, transfer)
+    return f"{validation_html}{transfer_html}"
+
+
+def render_phase4_sections(db: Database, config: AppConfig, job_id: int) -> str:
+    suggestions = db.list_llm_suggestions(job_id)
+    suggestion_rows = "".join(
+        f"<tr><td>{escape(item.get('type', ''))}</td><td>{escape(item.get('status', ''))}</td><td><code>{escape(str({k: v for k, v in item.items() if k not in {'id', 'status', 'created_at'}}))}</code></td></tr>"
+        for item in suggestions
+    )
+    cleanup_hold = db.has_cleanup_hold(job_id)
+    cleanup_rows = "".join(
+        f"<tr><td>{escape(item['item_type'])}</td><td>{'yes' if item['eligible'] else 'no'}</td><td><code>{escape(item['path'])}</code></td><td>{escape(item['reason'])}</td></tr>"
+        for item in db.list_cleanup_eligibility(job_id)
+    )
+    return f"""
+    <section class="ops">
+      <h2>Phase 4 Assistance</h2>
+      <p>Metadata providers: <strong>{'enabled' if config.metadata.enabled else 'disabled'}</strong> · LLM/Hermes: <strong>{'enabled' if config.llm.enabled else 'disabled'}</strong> · Cleanup: <strong>{'enabled' if config.cleanup.enabled else 'disabled'}</strong> ({'dry-run' if config.cleanup.dry_run else 'live'})</p>
+      <form method="post" action="/jobs/{job_id}/llm-suggestions" class="inline-form">
+        <button {'disabled' if not config.llm.enabled else ''}>Request LLM suggestions</button>
+      </form>
+      <form method="post" action="/jobs/{job_id}/generate-subtitle-plans" class="inline-form"><button>Generate subtitle plan</button></form>
+      <table>
+        <thead><tr><th>Suggestion</th><th>Status</th><th>Payload</th></tr></thead>
+        <tbody>{suggestion_rows or '<tr><td colspan="3">No LLM suggestions stored.</td></tr>'}</tbody>
+      </table>
+      <h3>Cleanup</h3>
+      <p>Cleanup hold: <strong>{'on' if cleanup_hold else 'off'}</strong></p>
+      <form method="post" action="/jobs/{job_id}/cleanup-plan" class="inline-form"><button>Generate cleanup plan</button></form>
+      <form method="post" action="/jobs/{job_id}/cleanup-hold" class="inline-form">
+        <label>Hold reason <input name="cleanup_hold_reason" value="manual hold"></label>
+        <button>Mark job as cleanup hold</button>
+      </form>
+      <form method="post" action="/jobs/{job_id}/remove-cleanup-hold" class="inline-form"><button>Remove cleanup hold</button></form>
+      <table>
+        <thead><tr><th>Type</th><th>Eligible</th><th>Path</th><th>Reason</th></tr></thead>
+        <tbody>{cleanup_rows or '<tr><td colspan="4">No cleanup plan recorded.</td></tr>'}</tbody>
+      </table>
+    </section>
+    """
+
+
+def render_dashboard(db: Database, config: AppConfig) -> str:
+    try:
+        summary = build_status_summary(db, config)
+    except Exception:
+        return ""
+    return f"<pre class='ops'>{escape(format_status_summary(summary))}</pre>"
+
+
+def render_validation_section(job_id: int, summary: dict | None) -> str:
+    if summary is None:
+        body = "<p class='muted'>No FileFlows output validation has been recorded.</p>"
+    else:
+        item_rows = "".join(render_validation_item(job_id, item) for item in summary.get("items", []))
+        warnings = "".join(f"<p class='errors'>{escape(warning)}</p>" for warning in summary.get("warnings", []))
+        body = f"""
+        <p>Status: <strong>{escape(summary.get('status', 'unknown'))}</strong></p>
+        {warnings}
+        <table>
+          <thead><tr><th>Source</th><th>Status</th><th>Expected</th><th>Matched</th><th>Profile</th><th>Warnings / Errors</th></tr></thead>
+          <tbody>{item_rows}</tbody>
+        </table>
+        """
+    return f"""
+    <section class="ops">
+      <h2>FileFlows Output Validation</h2>
+      {body}
+      <form method="post" action="/jobs/{job_id}/validate">
+        <button>Run validation for this job</button>
+      </form>
+    </section>
+    """
+
+
+def render_validation_item(job_id: int, item: dict) -> str:
+    warnings = [f"warning: {value}" for value in item.get("warnings", [])]
+    errors = [f"error: {value}" for value in item.get("errors", [])]
+    compliance = ", ".join(f"{key}: {value}" for key, value in (item.get("profile_compliance") or {}).items())
+    manual_form = ""
+    if item.get("status") == "failed":
+        manual_form = f"""
+        <form method="post" action="/jobs/{job_id}/manual-accept-output" class="inline-form">
+          <input type="hidden" name="source_file_id" value="{int(item['source_file_id'])}">
+          <label>Acceptance note <input name="manual_acceptance_note" required></label>
+          <button>Manually accept</button>
+        </form>
+        """
+    return f"""
+    <tr>
+      <td>{int(item['source_file_id'])}</td>
+      <td>{escape(item.get('status', ''))}{"<br>manual" if item.get('manually_accepted') else ""}</td>
+      <td><code>{escape(item.get('expected_output_name') or '')}</code><br><code>{escape(item.get('expected_final_path') or '')}</code></td>
+      <td><code>{escape(item.get('matched_output_path') or '')}</code></td>
+      <td>{escape(compliance)}</td>
+      <td>{escape('; '.join([*warnings, *errors]) or 'none')}{manual_form}</td>
+    </tr>
+    """
+
+
+def render_transfer_section(job_id: int, validation: dict | None, summary: dict | None) -> str:
+    ready = validation is not None and bool(validation.get("passed"))
+    if summary is None:
+        body = "<p class='muted'>No Eddy transfer has been recorded.</p>"
+    else:
+        rows = "".join(
+            f"""
+            <tr>
+              <td>{int(item['source_file_id'])}</td>
+              <td>{escape(item.get('status', ''))}</td>
+              <td><code>{escape(item.get('incoming_path') or '')}</code></td>
+              <td><code>{escape(item.get('final_path') or '')}</code></td>
+              <td>{escape(item.get('conflict') or item.get('error') or '')}</td>
+            </tr>
+            """
+            for item in summary.get("items", [])
+        )
+        body = f"""
+        <p>Status: <strong>{escape(summary.get('status', 'unknown'))}</strong></p>
+        <table>
+          <thead><tr><th>Source</th><th>Status</th><th>Eddy Incoming</th><th>Final Eddy Path</th><th>Conflict / Error</th></tr></thead>
+          <tbody>{rows}</tbody>
+        </table>
+        """
+    return f"""
+    <section class="ops">
+      <h2>Eddy Transfer and Import</h2>
+      <p>Readiness: <strong>{'ready' if ready else 'not ready'}</strong></p>
+      {body}
+      <form method="post" action="/jobs/{job_id}/transfer">
+        <button {'disabled' if not ready else ''}>Transfer validated outputs</button>
+      </form>
+    </section>
     """
 
 
@@ -506,6 +732,25 @@ def format_streams(streams: list[dict]) -> str:
     )
 
 
+def _source_for_plan(row: dict, audio: list[dict], subtitles: list[dict]) -> ScannedFile:
+    return ScannedFile(
+        path=row["path"],
+        filename=row["filename"],
+        parent_disc_folder=row["parent_disc_folder"],
+        size_bytes=row["size_bytes"],
+        modified_time=row["modified_time"],
+        duration_seconds=row["duration_seconds"],
+        container_format=row["container_format"],
+        video=VideoInfo(**json.loads(row["video_json"] or "{}")),
+        audio_streams=[AudioStream(**stream) for stream in audio],
+        subtitle_streams=[SubtitleStream(**stream) for stream in subtitles],
+        chapter_count=row["chapter_count"],
+        embedded_title=row["embedded_title"],
+        makemkv_title=row["makemkv_title"],
+        raw_ffprobe={},
+    )
+
+
 def page(title: str, body: str) -> str:
     return f"""<!doctype html>
     <html lang="en">
@@ -521,6 +766,7 @@ def page(title: str, body: str) -> str:
         table {{ width: 100%; border-collapse: collapse; background: white; }}
         th, td {{ border-bottom: 1px solid #d7dde3; padding: 8px; text-align: left; vertical-align: top; }}
         fieldset, .file-card {{ border: 1px solid #d7dde3; background: white; border-radius: 6px; margin: 16px 0; padding: 16px; }}
+        .ops {{ border: 1px solid #d7dde3; background: white; border-radius: 6px; margin: 16px 0; padding: 16px; }}
         label {{ display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }}
         input, select, textarea, button {{ font: inherit; padding: 7px; }}
         textarea {{ min-height: 70px; }}
@@ -528,6 +774,7 @@ def page(title: str, body: str) -> str:
         .wide {{ grid-column: 1 / -1; }}
         .tech {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; font-size: 0.9rem; }}
         .actions {{ position: sticky; bottom: 0; background: #edf1f5; border-top: 1px solid #cbd4dd; padding: 12px; display: flex; flex-wrap: wrap; gap: 8px; }}
+        .inline-form {{ display: flex; align-items: end; gap: 8px; margin-top: 8px; flex-wrap: wrap; }}
         .errors {{ color: #9f1d20; background: #fff2f2; border: 1px solid #f0b8b8; border-radius: 6px; padding: 8px; }}
         .muted {{ color: #5c6975; }}
         code {{ word-break: break-all; }}

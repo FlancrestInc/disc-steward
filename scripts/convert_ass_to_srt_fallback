@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Safe scaffold for creating SRT fallback from ASS subtitles.
+
+ASS styling/sign placement should be preserved in the original media. This
+helper is a future hook for adding an unverified SRT fallback sidecar.
+"""
+
+from __future__ import annotations
+
+import argparse
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("ass_path")
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+    print(f"planned ASS-to-SRT fallback only: {args.ass_path} -> {args.output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

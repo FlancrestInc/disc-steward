@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Safe scaffold for future subtitle stream tagging.
+
+This helper does not mutate containers in Phase 4. It prints the requested
+intent so FileFlows logs can capture the reviewed plan.
+"""
+
+from __future__ import annotations
+
+import argparse
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("media_path")
+    parser.add_argument("--stream-index", type=int, required=True)
+    parser.add_argument("--language")
+    parser.add_argument("--default", choices=["true", "false"])
+    parser.add_argument("--forced", choices=["true", "false"])
+    args = parser.parse_args()
+    print(
+        "planned tag update only: "
+        f"{args.media_path} stream={args.stream_index} language={args.language} default={args.default} forced={args.forced}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

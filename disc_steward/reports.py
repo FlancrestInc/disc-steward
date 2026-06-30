@@ -6,16 +6,40 @@ from pathlib import Path
 
 from .config import AppConfig
 from .db import Database
+from .status import build_status_summary, format_status_summary
 
 
 def generate_reports(db: Database, config: AppConfig) -> list[Path]:
     config.review_needed_path.mkdir(parents=True, exist_ok=True)
     reports: list[Path] = []
+    dashboard = config.review_needed_path / "dashboard.html"
+    dashboard.write_text(render_dashboard_report(db, config), encoding="utf-8")
+    reports.append(dashboard)
     for job in db.list_jobs():
         output = config.review_needed_path / f"job_{job.id}_report.html"
         output.write_text(render_job_report(db, job.id), encoding="utf-8")
         reports.append(output)
     return reports
+
+
+def render_dashboard_report(db: Database, config: AppConfig) -> str:
+    summary = build_status_summary(db, config)
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Disc Steward Dashboard</title>
+  <style>
+    body {{ font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.45; color: #17202a; }}
+    pre {{ background: #f6f8fa; border: 1px solid #d8dee4; padding: 1rem; white-space: pre-wrap; }}
+  </style>
+</head>
+<body>
+  <h1>Disc Steward Dashboard</h1>
+  <pre>{html.escape(format_status_summary(summary))}</pre>
+</body>
+</html>
+"""
 
 
 def render_job_report(db: Database, job_id: int) -> str:
@@ -45,7 +69,7 @@ def render_job_report(db: Database, job_id: int) -> str:
     <tbody>{file_sections}</tbody>
   </table>
   <h2>Suggested Next Action</h2>
-  <p>Review main feature and extras, add metadata IDs, then approve later FileFlows handoff. Phase 1 does not move, rename, or delete media.</p>
+  <p>Review main feature and extras, add metadata IDs, then approve FileFlows handoff. Cleanup and transfer actions remain gated by validation, configuration, and audit logging.</p>
 </body>
 </html>
 """

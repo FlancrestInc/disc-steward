@@ -15,6 +15,7 @@ class JellyfinConfig:
     base_url: str | None = None
     api_key: str | None = None
     refresh_enabled: bool = False
+    refresh_after_import: bool = False
     library_ids: list[str] = field(default_factory=list)
 
 
@@ -22,6 +23,69 @@ class JellyfinConfig:
 class LLMConfig:
     enabled: bool = False
     provider: str = "hermes"
+    endpoint: str = ""
+    max_items_per_request: int = 10
+    max_chars_per_field: int = 500
+    allow_full_subtitle_text: bool = False
+    allow_shell_commands: bool = False
+
+
+@dataclass
+class MetadataProviderConfig:
+    enabled: bool = False
+    api_key: str = ""
+
+
+@dataclass
+class MetadataConfig:
+    enabled: bool = False
+    providers: dict[str, MetadataProviderConfig] = field(
+        default_factory=lambda: {
+            "tmdb": MetadataProviderConfig(),
+            "tvdb": MetadataProviderConfig(),
+            "anilist": MetadataProviderConfig(),
+            "anidb": MetadataProviderConfig(),
+            "mal": MetadataProviderConfig(),
+        }
+    )
+
+
+@dataclass
+class SubtitlePlanningConfig:
+    preferred_format: str = "srt"
+    preserve_original_subtitles: bool = True
+    convert_image_subtitles_to_srt: bool = False
+    preserve_ass_for_anime: bool = True
+    add_srt_fallback_for_ass: bool = True
+
+
+@dataclass
+class JapaneseAnimeConfig:
+    preserve_unicode_metadata: bool = True
+    english_filename_with_original_metadata: bool = True
+    allow_original_title_in_filename: bool = False
+    preserve_ass_by_default: bool = True
+    auto_translate_metadata: bool = False
+
+
+@dataclass
+class CleanupConfig:
+    enabled: bool = False
+    dry_run: bool = True
+    raw_rip_retention_days_after_import: int = 14
+    working_file_retention_days_after_import: int = 7
+    delete_raw_rips: bool = False
+    delete_working_files: bool = False
+    archive_raw_rips_to_eddy: bool = False
+    raw_rip_archive_path: str = ""
+    require_successful_jellyfin_import: bool = True
+
+
+@dataclass
+class JellyfinLogsConfig:
+    enabled: bool = False
+    log_path: str = ""
+    scan_recent_days: int = 7
 
 
 @dataclass
@@ -68,13 +132,26 @@ class AppConfig:
     )
     minimum_title_duration_seconds: int = 30
     duration_tolerance_seconds: int = 5
+    duration_tolerance_percent: float = 1.0
+    validation_require_aac_fallback: bool = True
+    validation_require_no_default_image_subtitles: bool = True
+    validation_allow_manual_acceptance: bool = True
     cleanup_enabled: bool = False
     raw_rip_retention_days: int = 30
     working_file_retention_days: int = 14
     overwrite_existing: bool = False
+    transfer_verify: str = "size"
+    create_final_directories: bool = True
+    rsync_target: str | None = None
+    ssh_options: list[str] = field(default_factory=list)
     dry_run: bool = True
     jellyfin: JellyfinConfig = field(default_factory=JellyfinConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    metadata: MetadataConfig = field(default_factory=MetadataConfig)
+    subtitle_planning: SubtitlePlanningConfig = field(default_factory=SubtitlePlanningConfig)
+    japanese_anime: JapaneseAnimeConfig = field(default_factory=JapaneseAnimeConfig)
+    cleanup: CleanupConfig = field(default_factory=CleanupConfig)
+    jellyfin_logs: JellyfinLogsConfig = field(default_factory=JellyfinLogsConfig)
 
     @classmethod
     def default_for_root(cls, root: Path) -> "AppConfig":
@@ -118,21 +195,47 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
     root = _path(data.get("pipeline_root", "/mnt/data2/media-pipeline"))
     paths = data.get("paths", {})
     eddy = data.get("eddy", {})
+    validation = data.get("validation", {})
+    transfer = data.get("transfer", {})
+    cleanup = data.get("cleanup", {})
     defaults = AppConfig.default_for_root(root.parent)
     library_roots = {
         name: _path(value)
-        for name, value in eddy.get(
-            "library_roots",
-            {
-                "Movies": "/mnt/jellyfin-media/Movies",
-                "Shows": "/mnt/jellyfin-media/Shows",
-                "Anime": "/mnt/jellyfin-media/Anime",
-                "Family Videos": "/mnt/jellyfin-media/Family Videos",
-            },
+        for name, value in transfer.get(
+            "eddy_final_roots",
+            eddy.get(
+                "library_roots",
+                {
+                    "Movies": "/mnt/jellyfin-media/Movies",
+                    "Shows": "/mnt/jellyfin-media/Shows",
+                    "Anime": "/mnt/jellyfin-media/Anime",
+                    "Family Videos": "/mnt/jellyfin-media/Family Videos",
+                },
+            ),
         ).items()
     }
     jellyfin = data.get("jellyfin", {})
     llm = data.get("llm", {})
+    metadata = data.get("metadata", {})
+    subtitle_planning = data.get("subtitle_planning", {})
+    japanese_anime = data.get("japanese_anime", {})
+    jellyfin_logs = data.get("jellyfin_logs", {})
+    metadata_providers = metadata.get("providers", {})
+    cleanup_config = CleanupConfig(
+        enabled=bool(cleanup.get("enabled", data.get("cleanup_enabled", False))),
+        dry_run=bool(cleanup.get("dry_run", data.get("dry_run", True))),
+        raw_rip_retention_days_after_import=int(
+            cleanup.get("raw_rip_retention_days_after_import", data.get("raw_rip_retention_days", 14))
+        ),
+        working_file_retention_days_after_import=int(
+            cleanup.get("working_file_retention_days_after_import", data.get("working_file_retention_days", 7))
+        ),
+        delete_raw_rips=bool(cleanup.get("delete_raw_rips", False)),
+        delete_working_files=bool(cleanup.get("delete_working_files", False)),
+        archive_raw_rips_to_eddy=bool(cleanup.get("archive_raw_rips_to_eddy", False)),
+        raw_rip_archive_path=str(cleanup.get("raw_rip_archive_path", "") or ""),
+        require_successful_jellyfin_import=bool(cleanup.get("require_successful_jellyfin_import", True)),
+    )
     return AppConfig(
         pipeline_root=root,
         raw_rip_path=_path(paths.get("raw_rip_path", root / "01_disc_rips_raw")),
@@ -148,10 +251,10 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
         database_path=_path(data.get("database_path", defaults.database_path)),
         ffprobe_path=data.get("ffprobe_path", "ffprobe"),
         ffmpeg_path=data.get("ffmpeg_path", "ffmpeg"),
-        eddy_incoming_path=_path(eddy.get("incoming_path", "/mnt/jellyfin-media/.incoming")),
+        eddy_incoming_path=_path(transfer.get("eddy_incoming_root", eddy.get("incoming_path", "/mnt/jellyfin-media/.incoming"))),
         eddy_library_roots=library_roots,
-        transfer_method=data.get("transfer_method", "local_mount"),
-        rsync_destination=data.get("rsync_destination"),
+        transfer_method=transfer.get("method", data.get("transfer_method", "local_mount")),
+        rsync_destination=transfer.get("rsync_target", data.get("rsync_destination")),
         preferred_video_profile=data.get("preferred_video_profile", "universal_h264_aac_srt"),
         preferred_audio_fallback_codec=data.get("preferred_audio_fallback_codec", "aac"),
         preferred_subtitle_format=data.get("preferred_subtitle_format", "srt"),
@@ -181,17 +284,64 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
             )
         ),
         minimum_title_duration_seconds=int(data.get("minimum_title_duration_seconds", 30)),
-        duration_tolerance_seconds=int(data.get("duration_tolerance_seconds", 5)),
-        cleanup_enabled=bool(data.get("cleanup_enabled", False)),
-        raw_rip_retention_days=int(data.get("raw_rip_retention_days", 30)),
-        working_file_retention_days=int(data.get("working_file_retention_days", 14)),
-        overwrite_existing=bool(data.get("overwrite_existing", False)),
-        dry_run=bool(data.get("dry_run", True)),
+        duration_tolerance_seconds=int(validation.get("duration_tolerance_seconds", data.get("duration_tolerance_seconds", 5))),
+        duration_tolerance_percent=float(validation.get("duration_tolerance_percent", 1.0)),
+        validation_require_aac_fallback=bool(validation.get("require_aac_fallback", True)),
+        validation_require_no_default_image_subtitles=bool(validation.get("require_no_default_image_subtitles", True)),
+        validation_allow_manual_acceptance=bool(validation.get("allow_manual_acceptance", True)),
+        cleanup_enabled=cleanup_config.enabled,
+        raw_rip_retention_days=cleanup_config.raw_rip_retention_days_after_import,
+        working_file_retention_days=cleanup_config.working_file_retention_days_after_import,
+        overwrite_existing=bool(transfer.get("allow_overwrite", data.get("overwrite_existing", False))),
+        transfer_verify=transfer.get("verify", "size"),
+        create_final_directories=bool(transfer.get("create_final_directories", True)),
+        rsync_target=transfer.get("rsync_target", data.get("rsync_destination")),
+        ssh_options=list(transfer.get("ssh_options", [])),
+        dry_run=bool(data.get("dry_run", cleanup_config.dry_run)),
         jellyfin=JellyfinConfig(
             base_url=jellyfin.get("base_url"),
             api_key=jellyfin.get("api_key"),
-            refresh_enabled=bool(jellyfin.get("refresh_enabled", False)),
+            refresh_enabled=bool(jellyfin.get("enabled", jellyfin.get("refresh_enabled", False))),
+            refresh_after_import=bool(jellyfin.get("refresh_after_import", False)),
             library_ids=list(jellyfin.get("library_ids", [])),
         ),
-        llm=LLMConfig(enabled=bool(llm.get("enabled", False)), provider=llm.get("provider", "hermes")),
+        llm=LLMConfig(
+            enabled=bool(llm.get("enabled", False)),
+            provider=llm.get("provider", "hermes"),
+            endpoint=llm.get("endpoint", ""),
+            max_items_per_request=int(llm.get("max_items_per_request", 10)),
+            max_chars_per_field=int(llm.get("max_chars_per_field", 500)),
+            allow_full_subtitle_text=bool(llm.get("allow_full_subtitle_text", False)),
+            allow_shell_commands=bool(llm.get("allow_shell_commands", False)),
+        ),
+        metadata=MetadataConfig(
+            enabled=bool(metadata.get("enabled", False)),
+            providers={
+                name: MetadataProviderConfig(
+                    enabled=bool(metadata_providers.get(name, {}).get("enabled", False)),
+                    api_key=metadata_providers.get(name, {}).get("api_key", ""),
+                )
+                for name in ["tmdb", "tvdb", "anilist", "anidb", "mal"]
+            },
+        ),
+        subtitle_planning=SubtitlePlanningConfig(
+            preferred_format=subtitle_planning.get("preferred_format", data.get("preferred_subtitle_format", "srt")),
+            preserve_original_subtitles=bool(subtitle_planning.get("preserve_original_subtitles", True)),
+            convert_image_subtitles_to_srt=bool(subtitle_planning.get("convert_image_subtitles_to_srt", False)),
+            preserve_ass_for_anime=bool(subtitle_planning.get("preserve_ass_for_anime", True)),
+            add_srt_fallback_for_ass=bool(subtitle_planning.get("add_srt_fallback_for_ass", True)),
+        ),
+        japanese_anime=JapaneseAnimeConfig(
+            preserve_unicode_metadata=bool(japanese_anime.get("preserve_unicode_metadata", True)),
+            english_filename_with_original_metadata=bool(japanese_anime.get("english_filename_with_original_metadata", True)),
+            allow_original_title_in_filename=bool(japanese_anime.get("allow_original_title_in_filename", False)),
+            preserve_ass_by_default=bool(japanese_anime.get("preserve_ass_by_default", True)),
+            auto_translate_metadata=bool(japanese_anime.get("auto_translate_metadata", False)),
+        ),
+        cleanup=cleanup_config,
+        jellyfin_logs=JellyfinLogsConfig(
+            enabled=bool(jellyfin_logs.get("enabled", False)),
+            log_path=jellyfin_logs.get("log_path", ""),
+            scan_recent_days=int(jellyfin_logs.get("scan_recent_days", 7)),
+        ),
     )
