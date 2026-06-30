@@ -151,7 +151,7 @@ def scan_disc_folder(
     ffprobe_runner: Callable[[Path], str] | None = None,
 ) -> int:
     db.initialize()
-    job_id = db.upsert_job(disc_folder, "scanned")
+    job_id = db.upsert_job(disc_folder, "review_needed")
     runner = ffprobe_runner or (lambda path: run_ffprobe(config.ffprobe_path, path))
     scanned_files: list[ScannedFile] = []
     for media_path in sorted(disc_folder.rglob("*.mkv")):

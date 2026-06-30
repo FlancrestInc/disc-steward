@@ -127,6 +127,73 @@ class ReviewDecision:
 
 
 @dataclass
+class JobReviewMetadata:
+    job_id: int
+    title: str = ""
+    original_title: str | None = None
+    year: int | None = None
+    content_type: str = "unknown"
+    library_root: str = "Movies"
+    imdb_id: str | None = None
+    tmdb_id: str | None = None
+    tvdb_id: str | None = None
+    anidb_id: str | None = None
+    anilist_id: str | None = None
+    mal_id: str | None = None
+    notes: str | None = None
+    review_status: str = "review_needed"
+    work_order_folder: str | None = None
+    work_order_created_at: str | None = None
+    warnings: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FileReviewDecision:
+    source_file_id: int
+    include_in_work_order: bool = True
+    role: str = ""
+    content_type: str = "unknown"
+    final_display_name: str | None = None
+    final_filename: str | None = None
+    original_title: str | None = None
+    translated_title: str | None = None
+    romanized_title: str | None = None
+    imdb_id: str | None = None
+    tmdb_id: str | None = None
+    tvdb_id: str | None = None
+    anidb_id: str | None = None
+    anilist_id: str | None = None
+    mal_id: str | None = None
+    extra_type: str | None = None
+    season_number: int | None = None
+    episode_number: int | None = None
+    sort_order: int | None = None
+    encoding_profile: str = ""
+    subtitle_policy: str = ""
+    generated_final_path: str | None = None
+    notes: str | None = None
+    warnings: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+
+
+@dataclass
+class GeneratedPath:
+    source_file_id: int
+    final_path: Path
+    output_name: str
+    warnings: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+
+
+@dataclass
+class SubtitlePolicySuggestion:
+    policy: str
+    warnings: list[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
 class ValidationResult:
     passed: bool
     issues: list[str] = field(default_factory=list)

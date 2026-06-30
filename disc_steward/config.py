@@ -47,6 +47,25 @@ class AppConfig:
     preferred_video_profile: str = "universal_h264_aac_srt"
     preferred_audio_fallback_codec: str = "aac"
     preferred_subtitle_format: str = "srt"
+    encoding_profiles: list[str] = field(
+        default_factory=lambda: [
+            "remux_only",
+            "universal_h264_aac_srt",
+            "subtitle_fix_only",
+            "h265_archive_friendly",
+            "manual_review",
+        ]
+    )
+    subtitle_policies: list[str] = field(
+        default_factory=lambda: [
+            "preserve_existing",
+            "prefer_srt_preserve_original",
+            "ocr_image_subtitles_to_srt_preserve_original",
+            "generate_missing_srt_unverified",
+            "preserve_ass_add_srt_fallback",
+            "manual_review",
+        ]
+    )
     minimum_title_duration_seconds: int = 30
     duration_tolerance_seconds: int = 5
     cleanup_enabled: bool = False
@@ -136,6 +155,31 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
         preferred_video_profile=data.get("preferred_video_profile", "universal_h264_aac_srt"),
         preferred_audio_fallback_codec=data.get("preferred_audio_fallback_codec", "aac"),
         preferred_subtitle_format=data.get("preferred_subtitle_format", "srt"),
+        encoding_profiles=list(
+            data.get(
+                "encoding_profiles",
+                [
+                    "remux_only",
+                    "universal_h264_aac_srt",
+                    "subtitle_fix_only",
+                    "h265_archive_friendly",
+                    "manual_review",
+                ],
+            )
+        ),
+        subtitle_policies=list(
+            data.get(
+                "subtitle_policies",
+                [
+                    "preserve_existing",
+                    "prefer_srt_preserve_original",
+                    "ocr_image_subtitles_to_srt_preserve_original",
+                    "generate_missing_srt_unverified",
+                    "preserve_ass_add_srt_fallback",
+                    "manual_review",
+                ],
+            )
+        ),
         minimum_title_duration_seconds=int(data.get("minimum_title_duration_seconds", 30)),
         duration_tolerance_seconds=int(data.get("duration_tolerance_seconds", 5)),
         cleanup_enabled=bool(data.get("cleanup_enabled", False)),

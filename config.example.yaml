@@ -28,6 +28,19 @@ rsync_destination:
 preferred_video_profile: universal_h264_aac_srt
 preferred_audio_fallback_codec: aac
 preferred_subtitle_format: srt
+encoding_profiles:
+  - remux_only
+  - universal_h264_aac_srt
+  - subtitle_fix_only
+  - h265_archive_friendly
+  - manual_review
+subtitle_policies:
+  - preserve_existing
+  - prefer_srt_preserve_original
+  - ocr_image_subtitles_to_srt_preserve_original
+  - generate_missing_srt_unverified
+  - preserve_ass_add_srt_fallback
+  - manual_review
 minimum_title_duration_seconds: 30
 duration_tolerance_seconds: 5
 cleanup_enabled: false

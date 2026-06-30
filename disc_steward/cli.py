@@ -2,42 +2,43 @@ from __future__ import annotations
 
 import argparse
 import logging
-from pathlib import Path
 
 from .config import load_config
 from .db import Database
 from .reports import generate_reports
-from .review import serve_static_reports
 from .scanner import scan_completed_rips
 from .utils import configure_logging
+from .web import serve_review_ui
+from .work_orders import create_fileflows_work_orders
 
 LOG = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="disc-steward")
-    parser.add_argument("--config", default="config.yaml", help="Path to config YAML")
-    parser.add_argument("--verbose", action="store_true")
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument("--config", default=argparse.SUPPRESS, help="Path to config YAML")
+    shared.add_argument("--verbose", action="store_true", default=argparse.SUPPRESS)
+    parser = argparse.ArgumentParser(prog="disc-steward", parents=[shared])
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("scan", help="Scan completed rip folders")
-    sub.add_parser("report", help="Generate static HTML reports")
-    serve = sub.add_parser("serve", help="Serve review/report UI")
+    sub.add_parser("scan", parents=[shared], help="Scan completed rip folders")
+    sub.add_parser("report", parents=[shared], help="Generate static HTML reports")
+    serve = sub.add_parser("serve", parents=[shared], help="Serve review/report UI")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8765)
-    prepare = sub.add_parser("prepare-fileflows", help="Create FileFlows work orders for reviewed jobs")
+    prepare = sub.add_parser("prepare-fileflows", parents=[shared], help="Create FileFlows work orders for reviewed jobs")
     prepare.add_argument("--job-id", type=int, required=True)
-    validate = sub.add_parser("validate", help="Validate FileFlows output")
+    validate = sub.add_parser("validate", parents=[shared], help="Validate FileFlows output")
     validate.add_argument("--job-id", type=int, required=True)
-    transfer = sub.add_parser("transfer", help="Transfer validated output to Eddy")
+    transfer = sub.add_parser("transfer", parents=[shared], help="Transfer validated output to Eddy")
     transfer.add_argument("--job-id", type=int, required=True)
-    sub.add_parser("cleanup", help="Evaluate cleanup eligibility; deletion disabled by default")
+    sub.add_parser("cleanup", parents=[shared], help="Evaluate cleanup eligibility; deletion disabled by default")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    configure_logging(args.verbose)
-    config = load_config(args.config)
+    configure_logging(getattr(args, "verbose", False))
+    config = load_config(getattr(args, "config", "config.yaml"))
     db = Database(config.database_path)
     db.initialize()
     if args.command == "scan":
@@ -50,13 +51,13 @@ def main(argv: list[str] | None = None) -> int:
             print(report)
         return 0
     if args.command == "serve":
-        generate_reports(db, config)
-        print(f"Serving Disc Steward reports at http://{args.host}:{args.port}")
-        serve_static_reports(config.review_needed_path, args.host, args.port)
+        print(f"Serving Disc Steward review UI at http://{args.host}:{args.port}")
+        serve_review_ui(db, config, args.host, args.port)
         return 0
     if args.command == "prepare-fileflows":
-        LOG.warning("prepare-fileflows is scaffolded; use the review UI/data model in Phase 2")
-        return 2
+        folder = create_fileflows_work_orders(db, config, args.job_id)
+        print(folder)
+        return 0
     if args.command == "validate":
         LOG.warning("validate is scaffolded for manual invocation in Phase 3")
         return 2
