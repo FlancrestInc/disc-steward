@@ -102,6 +102,17 @@ def test_review_page_renders_lookup_button_and_inline_player(tmp_path):
     assert "External player path" in html
 
 
+def test_review_page_explains_provider_id_formats(tmp_path):
+    config = _config(tmp_path)
+    db, job_id, _source_id, _media = _job_with_source(tmp_path, config)
+
+    html = web.render_job_review(db, config, job_id)
+
+    assert 'placeholder="tt0245429"' in html
+    assert 'placeholder="268 or TMDb movie URL"' in html
+    assert "Lookup All uses the disc-level provider ID fields first" in html
+
+
 def test_media_review_link_uses_http_stream_instead_of_file_uri(tmp_path):
     config = _config(tmp_path)
     db, _job_id, source_id, media = _job_with_source(tmp_path, config)

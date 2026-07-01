@@ -565,13 +565,13 @@ def render_job_fields(config: AppConfig, review: JobReviewMetadata) -> str:
       <label>Year <input name="year" value="{escape(str(review.year or ''))}" inputmode="numeric"></label>
       <label>Content type {select("content_type", CONTENT_TYPES, review.content_type)}</label>
       <label>Library root {select("library_root", list(config.eddy_library_roots.keys()) or LIBRARY_ROOTS, review.library_root)}</label>
-      <label>IMDb ID <input name="imdb_id" value="{escape(review.imdb_id or '')}"></label>
-      <label>TMDb ID <input name="tmdb_id" value="{escape(review.tmdb_id or '')}"></label>
+      <label>IMDb ID <input name="imdb_id" value="{escape(review.imdb_id or '')}" placeholder="tt0245429"></label>
+      <label>TMDb ID <input name="tmdb_id" value="{escape(review.tmdb_id or '')}" placeholder="268 or TMDb movie URL"></label>
       <label>TVDb ID <input name="tvdb_id" value="{escape(review.tvdb_id or '')}"></label>
       <label>AniDB ID <input name="anidb_id" value="{escape(review.anidb_id or '')}"></label>
-      <label>AniList ID <input name="anilist_id" value="{escape(review.anilist_id or '')}"></label>
-      <label>MAL ID <input name="mal_id" value="{escape(review.mal_id or '')}"></label>
-      <p class="wide muted">Metadata lookup: {'enabled' if metadata_status['enabled'] else 'disabled'} · LLM/Hermes: {'enabled' if config.llm.enabled else 'disabled'}</p>
+      <label>AniList ID <input name="anilist_id" value="{escape(review.anilist_id or '')}" placeholder="20954 or AniList URL"></label>
+      <label>MAL ID <input name="mal_id" value="{escape(review.mal_id or '')}" placeholder="199"></label>
+      <p class="wide muted">Metadata lookup: {'enabled' if metadata_status['enabled'] else 'disabled'} · Lookup All uses the disc-level provider ID fields first, then falls back to title/year search. Accepted examples: IMDb <code>tt0245429</code>, TMDb <code>268</code>, <code>tmdbid-268</code>, or a TMDb movie URL. · LLM/Hermes: {'enabled' if config.llm.enabled else 'disabled'}</p>
       <label class="wide">Notes <textarea name="notes">{escape(review.notes or '')}</textarea></label>
     </fieldset>
     """

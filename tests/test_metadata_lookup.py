@@ -63,6 +63,25 @@ def test_tmdb_provider_uses_imdb_id_find_and_maps_movie_candidate():
     assert candidates[0].confidence == 1.0
 
 
+def test_tmdb_provider_accepts_common_tmdb_id_formats():
+    calls: list[str] = []
+
+    def sender(url: str, _payload: dict | None = None) -> dict:
+        calls.append(url)
+        if "/movie/268?" in url:
+            return {"id": 268, "title": "Batman", "release_date": "1989-06-23"}
+        raise ValueError(f"unexpected TMDb URL: {url}")
+
+    provider = metadata.TmdbProvider(api_key="tmdb-key", sender=sender)
+
+    for value in ["268", "tmdbid-268", "[tmdbid-268]", "https://www.themoviedb.org/movie/268-batman"]:
+        candidates = provider.lookup_by_ids(tmdb_id=value)
+        assert candidates[0].title == "Batman"
+        assert candidates[0].tmdb_id == "268"
+
+    assert any("/movie/268?" in url for url in calls)
+
+
 def test_anilist_provider_maps_mal_id_lookup_to_anime_candidate():
     assert hasattr(metadata, "AniListProvider")
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 from urllib.parse import urlencode, quote
@@ -79,6 +80,8 @@ class TmdbProvider(MetadataProvider):
         anilist_id: str | None = None,
         mal_id: str | None = None,
     ) -> list[MetadataCandidate]:
+        imdb_id = _imdb_id(imdb_id)
+        tmdb_id = _numeric_provider_id(tmdb_id, "tmdbid")
         if imdb_id:
             data = self._get(f"/find/{quote(imdb_id)}", {"external_source": "imdb_id"})
             candidates = []
@@ -171,6 +174,8 @@ class AniListProvider(MetadataProvider):
         mal_id: str | None = None,
     ) -> list[MetadataCandidate]:
         variables: dict[str, object] = {}
+        anilist_id = _numeric_provider_id(anilist_id, "anilistid")
+        mal_id = _numeric_provider_id(mal_id, "malid")
         if anilist_id:
             variables["id"] = _int_or_none(anilist_id)
         if mal_id:
@@ -421,6 +426,28 @@ def _int_or_none(value: str | None) -> int | None:
         return int(value) if value is not None else None
     except ValueError:
         return None
+
+
+def _imdb_id(value: str | None) -> str | None:
+    if not value:
+        return None
+    match = re.search(r"tt\d+", value, re.IGNORECASE)
+    return match.group(0).lower() if match else value.strip()
+
+
+def _numeric_provider_id(value: str | None, tag: str) -> str | None:
+    if not value:
+        return None
+    text = value.strip()
+    tag_match = re.search(rf"{re.escape(tag)}[-_\s:]*(\d+)", text, re.IGNORECASE)
+    if tag_match:
+        return tag_match.group(1)
+    url_match = re.search(r"/(?:movie|tv|anime|manga)/(\d+)(?:[^\d]|$)", text, re.IGNORECASE)
+    if url_match:
+        return url_match.group(1)
+    if text.isdigit():
+        return text
+    return None
 
 
 def metadata_provider_status(config: MetadataConfig) -> dict:
