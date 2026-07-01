@@ -261,10 +261,104 @@ def _longest_mappings(mappings: list[PathMapping], machine: str | None = None, n
 
 
 def load_config(path: str | Path) -> AppConfig:
-    if yaml is None:
-        raise RuntimeError("PyYAML is required to load YAML config files")
-    data = yaml.safe_load(Path(path).read_text()) or {}
+    text = Path(path).read_text()
+    data = yaml.safe_load(text) if yaml is not None else _parse_simple_yaml(text)
+    data = data or {}
+    if not isinstance(data, dict):
+        raise ValueError("Config file must contain a YAML mapping")
     return config_from_dict(data)
+
+
+def _parse_simple_yaml(text: str) -> dict[str, Any]:
+    root: dict[str, Any] = {}
+    stack: list[tuple[int, Any]] = [(-1, root)]
+    pending: list[tuple[int, dict[str, Any], str]] = []
+
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.rstrip()
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        stripped = line.strip()
+
+        while pending and indent <= pending[-1][0]:
+            pending.pop()
+        while len(stack) > 1 and indent <= stack[-1][0]:
+            stack.pop()
+
+        if pending and indent > pending[-1][0]:
+            parent_indent, parent, key = pending.pop()
+            container: dict[str, Any] | list[Any] = [] if stripped.startswith("- ") else {}
+            parent[key] = container
+            stack.append((parent_indent + 1, container))
+
+        parent = stack[-1][1]
+        if stripped.startswith("- "):
+            if not isinstance(parent, list):
+                raise ValueError(f"Unsupported YAML list item at line {line_number}")
+            item = stripped[2:].strip()
+            if not item:
+                child: dict[str, Any] = {}
+                parent.append(child)
+                stack.append((indent, child))
+            elif ":" in item:
+                child = {}
+                parent.append(child)
+                _assign_yaml_key_value(child, item, indent, pending, line_number)
+                stack.append((indent, child))
+            else:
+                parent.append(_parse_yaml_scalar(item))
+            continue
+
+        if not isinstance(parent, dict):
+            raise ValueError(f"Unsupported YAML mapping entry at line {line_number}")
+        _assign_yaml_key_value(parent, stripped, indent, pending, line_number)
+
+    return root
+
+
+def _assign_yaml_key_value(
+    parent: dict[str, Any],
+    text: str,
+    indent: int,
+    pending: list[tuple[int, dict[str, Any], str]],
+    line_number: int,
+) -> None:
+    key, separator, value = text.partition(":")
+    if not separator:
+        raise ValueError(f"Unsupported YAML line {line_number}: missing ':'")
+    key = key.strip()
+    value = value.strip()
+    if not key:
+        raise ValueError(f"Unsupported YAML line {line_number}: empty key")
+    if value == "":
+        parent[key] = None
+        pending.append((indent, parent, key))
+    else:
+        parent[key] = _parse_yaml_scalar(value)
+
+
+def _parse_yaml_scalar(value: str) -> Any:
+    if value in {"", "null", "Null", "NULL", "~"}:
+        return None
+    if value in {"true", "True", "TRUE"}:
+        return True
+    if value in {"false", "False", "FALSE"}:
+        return False
+    if value in {"[]", "[ ]"}:
+        return []
+    if value in {"{}", "{ }"}:
+        return {}
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        return value[1:-1]
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
 
 
 def config_from_dict(data: dict[str, Any]) -> AppConfig:
