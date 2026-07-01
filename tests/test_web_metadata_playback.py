@@ -102,6 +102,19 @@ def test_review_page_renders_lookup_button_and_inline_player(tmp_path):
     assert "External player path" in html
 
 
+def test_media_review_link_uses_http_stream_instead_of_file_uri(tmp_path):
+    config = _config(tmp_path)
+    db, _job_id, source_id, media = _job_with_source(tmp_path, config)
+    row = db.source_file_payload(source_id)
+
+    html = web.render_media_review_controls(config, row)
+
+    assert f'href="/media/{source_id}"' in html
+    assert 'target="_blank"' in html
+    assert 'href="file:' not in html
+    assert str(media) in html
+
+
 def test_media_route_streams_known_file_with_range_support(tmp_path):
     config = _config(tmp_path)
     db, _job_id, source_id, _media = _job_with_source(tmp_path, config)
@@ -125,3 +138,15 @@ def test_media_route_streams_known_file_with_range_support(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_media_stream_handles_client_disconnect_without_error(tmp_path):
+    config = _config(tmp_path)
+    _db, _job_id, _source_id, media = _job_with_source(tmp_path, config)
+
+    class DisconnectingWriter:
+        def write(self, _chunk: bytes) -> None:
+            raise BrokenPipeError()
+
+    assert hasattr(web, "_write_media_range")
+    assert web._write_media_range(media, DisconnectingWriter(), 0, media.stat().st_size) is False

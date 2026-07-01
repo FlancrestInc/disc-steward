@@ -146,15 +146,7 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         if partial:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.end_headers()
-        with path.open("rb") as handle:
-            handle.seek(start)
-            remaining = content_length
-            while remaining > 0:
-                chunk = handle.read(min(1024 * 1024, remaining))
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                remaining -= len(chunk)
+        _write_media_range(path, self.wfile, start, content_length)
 
 
 def _job_id_from_path(path: str) -> int | None:
@@ -200,6 +192,22 @@ def _parse_range(header: str | None, size: int) -> tuple[int, int, bool]:
     start = max(0, min(start, max(0, size - 1)))
     end = max(start, min(end, max(0, size - 1)))
     return start, end, True
+
+
+def _write_media_range(path: Path, writer, start: int, length: int) -> bool:
+    try:
+        with path.open("rb") as handle:
+            handle.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = handle.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                writer.write(chunk)
+                remaining -= len(chunk)
+    except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+        return False
+    return True
 
 
 def handle_job_action(db: Database, config: AppConfig, job_id: int, action: str, form: dict[str, str]) -> str:
@@ -667,20 +675,13 @@ def render_file_card(config: AppConfig, row: dict, decision: FileReviewDecision,
 def render_media_review_controls(config: AppConfig, row: dict) -> str:
     source_id = int(row["id"])
     native_path = config.to_barnabas_path(Path(row["path"]))
-    href = _file_href(native_path)
     return f"""
       <div class="media-review">
         <video controls preload="metadata" src="/media/{source_id}"></video>
-        <p class="muted"><strong>External player path:</strong> <a href="{escape(href)}"><code>{escape(str(native_path))}</code></a></p>
+        <p class="muted"><strong>Open video:</strong> <a href="/media/{source_id}" target="_blank" rel="noopener">Open stream</a></p>
+        <p class="muted"><strong>External player path:</strong> <code>{escape(str(native_path))}</code></p>
       </div>
     """
-
-
-def _file_href(path: Path) -> str:
-    try:
-        return path.resolve().as_uri()
-    except ValueError:
-        return f"file://{path}"
 
 
 def _mapped_path_line(label: str, mapped: Path, original: Path) -> str:
