@@ -91,9 +91,9 @@ python -m disc_steward serve --config config.yaml
 
 The job list shows each scanned disc folder, status, file count, likely main feature, probable extras, subtitle issues, transcode-risk issues, and review status. Open a job to review all ripped files grouped as main feature candidates, possible episodes, extras, trailers/promos, featurettes/documentaries, deleted scenes, menu/logo/bumper candidates, and manual review.
 
-At the disc level, enter the title, original/romanized/translated titles, year, content type, library root/category, IMDb/TMDb/TVDb/AniDB/AniList/MAL IDs, Japanese/anime hints, and notes. Online metadata lookup remains optional scaffolding; IDs are stored exactly as entered unless a user later approves a suggestion.
+At the disc level, enter or confirm the title, original/romanized/translated titles, year, content type, library root/category, IMDb/TMDb/TVDb/AniDB/AniList/MAL IDs, Japanese/anime hints, and notes. When metadata lookup is enabled, Disc Steward can run a best-effort TMDb/AniList lookup after scanning or from the review page's `Lookup All` button. High-confidence matches fill blank/default fields, while ambiguous matches are stored as candidates for review.
 
-At the file level, choose the role, display name, optional final filename override, content type, extra type, season/episode/sort order, encoding profile, subtitle policy, include/exclude decision, per-file metadata IDs, title overrides, and notes. Ignoring a file stores only a review decision; it does not delete or hide the source file permanently.
+At the file level, choose or confirm the role, display name, optional final filename override, content type, extra type, season/episode/sort order, encoding profile, subtitle policy, include/exclude decision, per-file metadata IDs, title overrides, and notes. Each file card includes a best-effort inline HTML5 player plus a native file path for external playback when the browser cannot play the source MKV. Ignoring a file stores only a review decision; it does not delete or hide the source file permanently.
 
 Subtitle policy suggestions are based on scan findings:
 
@@ -233,7 +233,7 @@ When enabled with `refresh_after_import: true`, Disc Steward triggers a full lib
 
 ## Metadata and Japanese/Anime Handling
 
-Metadata lookup is optional and disabled by default. The config includes provider stubs for TMDb, TVDb, AniList, AniDB, MAL, and manual IMDb ID entry. No API keys are hardcoded, and offline/manual review remains the default path.
+Metadata lookup is optional and disabled by default. V1 provider-backed lookup supports TMDb for movies/shows and AniList for anime. IMDb IDs are accepted as input and resolved through TMDb external-ID lookup; AniList can resolve AniList and MAL IDs. TVDb, AniDB, and MAL config entries remain reserved for future direct providers. No API keys are hardcoded, provider failures do not fail scans, and offline/manual review remains the default path.
 
 The review model stores original, romanized, and translated title fields plus Japanese/anime flags and language/script hints. Filenames can stay English while original Japanese titles remain in metadata. Disc Steward preserves Unicode safely, warns when Japanese/anime content is detected, preserves ASS subtitles by default when styling may matter, and recommends SRT fallback rather than replacing ASS. It does not auto-translate metadata without review.
 

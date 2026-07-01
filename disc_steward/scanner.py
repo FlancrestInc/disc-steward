@@ -149,6 +149,7 @@ def scan_disc_folder(
     config: AppConfig,
     disc_folder: Path,
     ffprobe_runner: Callable[[Path], str] | None = None,
+    metadata_lookup: Callable[[Database, AppConfig, int], object] | None = None,
 ) -> int:
     db.initialize()
     job_id = db.upsert_job(disc_folder, "review_needed")
@@ -165,6 +166,16 @@ def scan_disc_folder(
         source_id = db.upsert_source_file(job_id, scanned)
         db.save_classification(source_id, classifications[scanned.path])
     db.audit("scan", f"Scanned {len(scanned_files)} MKV file(s)", job_id, {"disc_folder": str(disc_folder)})
+    if config.metadata.enabled:
+        lookup = metadata_lookup
+        if lookup is None:
+            from .metadata import lookup_job_metadata
+
+            lookup = lookup_job_metadata
+        try:
+            lookup(db, config, job_id)
+        except Exception as error:
+            db.audit("metadata_lookup_failed", str(error), job_id)
     return job_id
 
 

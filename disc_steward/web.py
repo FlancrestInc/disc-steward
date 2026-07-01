@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -11,7 +12,7 @@ from .config import AppConfig
 from .cleanup import plan_cleanup
 from .db import Database
 from .llm import request_suggestions
-from .metadata import metadata_provider_status
+from .metadata import lookup_job_metadata, metadata_provider_status
 from .models import AudioStream, Classification, FileReviewDecision, JobReviewMetadata, ScannedFile, SubtitleStream, VideoInfo
 from .review import ReviewValidationError, classification_from_json, suggest_subtitle_policy, validate_review_ready
 from .status import build_status_summary, format_status_summary
@@ -53,11 +54,15 @@ GROUPS = [
 
 
 def serve_review_ui(db: Database, config: AppConfig, host: str = "127.0.0.1", port: int = 8765) -> None:
+    ThreadingHTTPServer((host, port), make_review_handler(db, config)).serve_forever()
+
+
+def make_review_handler(db: Database, config: AppConfig):
     class Handler(ReviewRequestHandler):
         database = db
         app_config = config
 
-    ThreadingHTTPServer((host, port), Handler).serve_forever()
+    return Handler
 
 
 class ReviewRequestHandler(BaseHTTPRequestHandler):
@@ -68,6 +73,13 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in {"", "/"}:
             self._send_html(render_job_list(self.database, self.app_config))
+            return
+        if path.startswith("/media/"):
+            source_id = _source_id_from_media_path(path)
+            if source_id is None:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            self._send_media(source_id)
             return
         if path.startswith("/jobs/"):
             job_id = _job_id_from_path(path)
@@ -115,6 +127,35 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Location", location)
         self.end_headers()
 
+    def _send_media(self, source_file_id: int) -> None:
+        row = self.database.source_file_payload(source_file_id)
+        if row is None:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        path = _media_path_for(self.app_config, row)
+        if not path.exists() or not path.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        size = path.stat().st_size
+        start, end, partial = _parse_range(self.headers.get("Range"), size)
+        content_length = end - start + 1
+        self.send_response(HTTPStatus.PARTIAL_CONTENT if partial else HTTPStatus.OK)
+        self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "video/x-matroska")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(content_length))
+        if partial:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        with path.open("rb") as handle:
+            handle.seek(start)
+            remaining = content_length
+            while remaining > 0:
+                chunk = handle.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
+
 
 def _job_id_from_path(path: str) -> int | None:
     parts = [part for part in path.split("/") if part]
@@ -126,7 +167,49 @@ def _job_id_from_path(path: str) -> int | None:
         return None
 
 
+def _source_id_from_media_path(path: str) -> int | None:
+    parts = [part for part in path.split("/") if part]
+    if len(parts) != 2 or parts[0] != "media":
+        return None
+    try:
+        return int(parts[1])
+    except ValueError:
+        return None
+
+
+def _media_path_for(config: AppConfig, row: dict) -> Path:
+    mapped = config.to_barnabas_path(Path(row["path"]))
+    return mapped if mapped.exists() else Path(row["path"])
+
+
+def _parse_range(header: str | None, size: int) -> tuple[int, int, bool]:
+    if not header or not header.startswith("bytes="):
+        return 0, max(0, size - 1), False
+    spec = header.removeprefix("bytes=").split(",", 1)[0].strip()
+    start_text, _, end_text = spec.partition("-")
+    try:
+        if start_text:
+            start = int(start_text)
+            end = int(end_text) if end_text else size - 1
+        else:
+            suffix = int(end_text)
+            start = max(0, size - suffix)
+            end = size - 1
+    except ValueError:
+        return 0, max(0, size - 1), False
+    start = max(0, min(start, max(0, size - 1)))
+    end = max(start, min(end, max(0, size - 1)))
+    return start, end, True
+
+
 def handle_job_action(db: Database, config: AppConfig, job_id: int, action: str, form: dict[str, str]) -> str:
+    if action == "lookup-metadata":
+        job_review, decisions = parse_review_form(db, config, job_id, form, "review_in_progress")
+        db.save_job_review(job_review)
+        for decision in decisions:
+            db.save_file_review(decision)
+        result = lookup_job_metadata(db, config, job_id)
+        return f"metadata-lookup:{len(result.candidates)}"
     if action in {"save", "mark-reviewed"}:
         status = "reviewed" if action == "mark-reviewed" else "review_in_progress"
         job_review, decisions = parse_review_form(db, config, job_id, form, status)
@@ -373,6 +456,7 @@ def render_job_review(
         {error_html}
         <form method="post" action="/jobs/{job_id}/save">
           {render_job_fields(config, job_review)}
+          {render_metadata_lookup_strip(db, config, job_id)}
           {groups_html}
           <div class="actions">
             <button formaction="/jobs/{job_id}/save">Save draft review</button>
@@ -485,6 +569,35 @@ def render_job_fields(config: AppConfig, review: JobReviewMetadata) -> str:
     """
 
 
+def render_metadata_lookup_strip(db: Database, config: AppConfig, job_id: int) -> str:
+    metadata_status = metadata_provider_status(config.metadata)
+    candidates = db.list_metadata_candidates(job_id)
+    provider_bits = [
+        f"{escape(name)}:{'ready' if details['configured'] else 'off'}"
+        for name, details in metadata_status["providers"].items()
+        if name in {"tmdb", "anilist"}
+    ]
+    candidate_bits = []
+    for candidate in candidates[:5]:
+        confidence = candidate.get("confidence")
+        confidence_text = f" ({float(confidence):.2f})" if isinstance(confidence, int | float) else ""
+        candidate_bits.append(
+            f"<span>{escape(str(candidate.get('provider') or ''))}: {escape(str(candidate.get('title') or ''))}{confidence_text}</span>"
+        )
+    candidates_html = " · ".join(candidate_bits) if candidate_bits else "No stored metadata candidates."
+    disabled = "disabled" if not metadata_status["enabled"] else ""
+    return f"""
+    <section class="lookup-strip">
+      <div>
+        <strong>Metadata lookup</strong>
+        <span class="muted">{'enabled' if metadata_status['enabled'] else 'disabled'} · {' · '.join(provider_bits)}</span>
+      </div>
+      <button formaction="/jobs/{job_id}/lookup-metadata" {disabled}>Lookup All</button>
+      <p class="wide muted">{candidates_html}</p>
+    </section>
+    """
+
+
 def render_file_card(config: AppConfig, row: dict, decision: FileReviewDecision, generated) -> str:
     source_id = row["id"]
     prefix = f"file_{source_id}_"
@@ -505,6 +618,7 @@ def render_file_card(config: AppConfig, row: dict, decision: FileReviewDecision,
       <h3>{escape(row['filename'])}</h3>
       <p class="muted"><strong>Controller path:</strong> <code>{escape(row['path'])}</code></p>
       {_mapped_path_line('Barnabas path', config.to_barnabas_path(Path(row['path'])), Path(row['path']))}
+      {render_media_review_controls(config, row)}
       <div class="tech">
         <span>Duration: {format_duration(row['duration_seconds'])}</span>
         <span>Resolution: {video.get('width') or '?'}x{video.get('height') or '?'}</span>
@@ -548,6 +662,25 @@ def render_file_card(config: AppConfig, row: dict, decision: FileReviewDecision,
       </div>
     </article>
     """
+
+
+def render_media_review_controls(config: AppConfig, row: dict) -> str:
+    source_id = int(row["id"])
+    native_path = config.to_barnabas_path(Path(row["path"]))
+    href = _file_href(native_path)
+    return f"""
+      <div class="media-review">
+        <video controls preload="metadata" src="/media/{source_id}"></video>
+        <p class="muted"><strong>External player path:</strong> <a href="{escape(href)}"><code>{escape(str(native_path))}</code></a></p>
+      </div>
+    """
+
+
+def _file_href(path: Path) -> str:
+    try:
+        return path.resolve().as_uri()
+    except ValueError:
+        return f"file://{path}"
 
 
 def _mapped_path_line(label: str, mapped: Path, original: Path) -> str:
@@ -783,6 +916,7 @@ def page(title: str, body: str) -> str:
         table {{ width: 100%; border-collapse: collapse; background: white; }}
         th, td {{ border-bottom: 1px solid #d7dde3; padding: 8px; text-align: left; vertical-align: top; }}
         fieldset, .file-card {{ border: 1px solid #d7dde3; background: white; border-radius: 6px; margin: 16px 0; padding: 16px; }}
+        .lookup-strip {{ border: 1px solid #d7dde3; background: white; border-radius: 6px; margin: 16px 0; padding: 12px; display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; }}
         .ops {{ border: 1px solid #d7dde3; background: white; border-radius: 6px; margin: 16px 0; padding: 16px; }}
         label {{ display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }}
         input, select, textarea, button {{ font: inherit; padding: 7px; }}
@@ -791,6 +925,8 @@ def page(title: str, body: str) -> str:
         .wide {{ grid-column: 1 / -1; }}
         .tech {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; font-size: 0.9rem; }}
         .actions {{ position: sticky; bottom: 0; background: #edf1f5; border-top: 1px solid #cbd4dd; padding: 12px; display: flex; flex-wrap: wrap; gap: 8px; }}
+        .media-review {{ margin: 12px 0; }}
+        .media-review video {{ display: block; width: 100%; max-height: 360px; aspect-ratio: 16 / 9; background: #111827; border-radius: 6px; }}
         .inline-form {{ display: flex; align-items: end; gap: 8px; margin-top: 8px; flex-wrap: wrap; }}
         .errors {{ color: #9f1d20; background: #fff2f2; border: 1px solid #f0b8b8; border-radius: 6px; padding: 8px; }}
         .muted {{ color: #5c6975; }}

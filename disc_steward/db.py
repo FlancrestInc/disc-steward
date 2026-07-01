@@ -450,6 +450,19 @@ class Database:
             ).fetchall()
         return [{key: row[key] for key in row.keys()} for row in rows]
 
+    def source_file_payload(self, source_file_id: int) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT sf.*, c.classification_json
+                FROM source_files sf
+                LEFT JOIN classifications c ON c.source_file_id = sf.id
+                WHERE sf.id = ?
+                """,
+                (source_file_id,),
+            ).fetchone()
+        return {key: row[key] for key in row.keys()} if row else None
+
     def list_job_summaries(self) -> list[dict]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -939,6 +952,53 @@ class Database:
                 "INSERT INTO metadata_candidates (job_id, source_file_id, provider, candidate_json) VALUES (?, ?, ?, ?)",
                 (job_id, source_file_id, provider, json.dumps(candidate, ensure_ascii=False)),
             )
+
+    def clear_metadata_candidates(self, job_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM metadata_candidates WHERE job_id = ?", (job_id,))
+
+    def list_metadata_candidates(self, job_id: int) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, source_file_id, provider, candidate_json, created_at
+                FROM metadata_candidates
+                WHERE job_id = ?
+                ORDER BY id
+                """,
+                (job_id,),
+            ).fetchall()
+        candidates = []
+        for row in rows:
+            payload = json.loads(row["candidate_json"])
+            payload.update(
+                {
+                    "id": row["id"],
+                    "source_file_id": row["source_file_id"],
+                    "provider": row["provider"],
+                    "created_at": row["created_at"],
+                }
+            )
+            candidates.append(payload)
+        return candidates
+
+    def list_audit_events(self, job_id: int | None = None) -> list[dict]:
+        with self.connect() as conn:
+            if job_id is None:
+                rows = conn.execute(
+                    "SELECT id, job_id, event_type, message, payload_json, created_at FROM audit_log ORDER BY id"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id, job_id, event_type, message, payload_json, created_at
+                    FROM audit_log
+                    WHERE job_id = ?
+                    ORDER BY id
+                    """,
+                    (job_id,),
+                ).fetchall()
+        return [{key: row[key] for key in row.keys()} for row in rows]
 
     def save_llm_request_response(self, job_id: int, provider: str, request: dict, response: dict) -> None:
         redacted_request = _redact_secrets(request)
