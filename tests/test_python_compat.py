@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import io
+import re
 import token
 import tokenize
 from pathlib import Path
@@ -49,3 +50,11 @@ def test_datetime_utc_constant_is_not_imported() -> None:
         ]
 
         assert offenders == [], f"{path} imports datetime.UTC, which is unavailable on Python 3.10"
+
+
+def test_package_metadata_allows_python_310() -> None:
+    pyproject = Path("pyproject.toml").read_text()
+    match = re.search(r'^requires-python = "([^"]+)"$', pyproject, re.MULTILINE)
+
+    assert match is not None
+    assert match.group(1) == ">=3.10"
