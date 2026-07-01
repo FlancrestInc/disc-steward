@@ -580,6 +580,7 @@ def render_job_fields(config: AppConfig, review: JobReviewMetadata) -> str:
 def render_metadata_lookup_strip(db: Database, config: AppConfig, job_id: int) -> str:
     metadata_status = metadata_provider_status(config.metadata)
     candidates = db.list_metadata_candidates(job_id)
+    last_lookup = _last_metadata_lookup_event(db, job_id)
     provider_bits = [
         f"{escape(name)}:{'ready' if details['configured'] else 'off'}"
         for name, details in metadata_status["providers"].items()
@@ -593,6 +594,11 @@ def render_metadata_lookup_strip(db: Database, config: AppConfig, job_id: int) -
             f"<span>{escape(str(candidate.get('provider') or ''))}: {escape(str(candidate.get('title') or ''))}{confidence_text}</span>"
         )
     candidates_html = " · ".join(candidate_bits) if candidate_bits else "No stored metadata candidates."
+    last_lookup_html = ""
+    if last_lookup:
+        warnings = last_lookup.get("payload", {}).get("warnings") or []
+        warnings_html = "".join(f"<span class='errors'>{escape(str(warning))}</span>" for warning in warnings)
+        last_lookup_html = f"<p class='wide muted'><strong>Last lookup:</strong> {escape(last_lookup.get('message') or '')}</p>{warnings_html}"
     disabled = "disabled" if not metadata_status["enabled"] else ""
     return f"""
     <section class="lookup-strip">
@@ -602,8 +608,14 @@ def render_metadata_lookup_strip(db: Database, config: AppConfig, job_id: int) -
       </div>
       <button formaction="/jobs/{job_id}/lookup-metadata" {disabled}>Lookup All</button>
       <p class="wide muted">{candidates_html}</p>
+      {last_lookup_html}
     </section>
     """
+
+
+def _last_metadata_lookup_event(db: Database, job_id: int) -> dict | None:
+    events = [event for event in db.list_audit_events(job_id) if event.get("event_type") == "metadata_lookup"]
+    return events[-1] if events else None
 
 
 def render_file_card(config: AppConfig, row: dict, decision: FileReviewDecision, generated) -> str:

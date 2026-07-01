@@ -82,16 +82,8 @@ class TmdbProvider(MetadataProvider):
     ) -> list[MetadataCandidate]:
         imdb_id = _imdb_id(imdb_id)
         tmdb_id = _numeric_provider_id(tmdb_id, "tmdbid")
-        if imdb_id:
-            data = self._get(f"/find/{quote(imdb_id)}", {"external_source": "imdb_id"})
-            candidates = []
-            for item in data.get("movie_results", []) or []:
-                candidates.append(self._movie_candidate(item, confidence=1.0, imdb_id=imdb_id))
-            for item in data.get("tv_results", []) or []:
-                candidates.append(self._tv_candidate(item, confidence=1.0, imdb_id=imdb_id))
-            return candidates
+        candidates = []
         if tmdb_id:
-            candidates = []
             for path, mapper in [(f"/movie/{quote(tmdb_id)}", self._movie_candidate), (f"/tv/{quote(tmdb_id)}", self._tv_candidate)]:
                 try:
                     item = self._get(path, {})
@@ -99,6 +91,14 @@ class TmdbProvider(MetadataProvider):
                     continue
                 if item.get("id"):
                     candidates.append(mapper(item, confidence=1.0))
+            if candidates:
+                return candidates
+        if imdb_id:
+            data = self._get(f"/find/{quote(imdb_id)}", {"external_source": "imdb_id"})
+            for item in data.get("movie_results", []) or []:
+                candidates.append(self._movie_candidate(item, confidence=1.0, imdb_id=imdb_id))
+            for item in data.get("tv_results", []) or []:
+                candidates.append(self._tv_candidate(item, confidence=1.0, imdb_id=imdb_id))
             return candidates
         return []
 

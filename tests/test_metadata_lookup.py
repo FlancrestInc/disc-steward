@@ -82,6 +82,34 @@ def test_tmdb_provider_accepts_common_tmdb_id_formats():
     assert any("/movie/268?" in url for url in calls)
 
 
+def test_tmdb_provider_prefers_tmdb_id_when_imdb_id_is_also_present():
+    calls: list[str] = []
+
+    def sender(url: str, _payload: dict | None = None) -> dict:
+        calls.append(url)
+        if "/movie/268?" in url:
+            return {"id": 268, "title": "Batman", "release_date": "1989-06-23"}
+        if "/find/tt0245429?" in url:
+            return {
+                "movie_results": [
+                    {
+                        "id": 129,
+                        "title": "Spirited Away",
+                        "release_date": "2001-07-20",
+                    }
+                ]
+            }
+        raise ValueError(f"unexpected TMDb URL: {url}")
+
+    provider = metadata.TmdbProvider(api_key="tmdb-key", sender=sender)
+
+    candidates = provider.lookup_by_ids(imdb_id="tt0245429", tmdb_id="tmdbid-268")
+
+    assert candidates[0].title == "Batman"
+    assert candidates[0].tmdb_id == "268"
+    assert "/movie/268?" in calls[0]
+
+
 def test_anilist_provider_maps_mal_id_lookup_to_anime_candidate():
     assert hasattr(metadata, "AniListProvider")
 

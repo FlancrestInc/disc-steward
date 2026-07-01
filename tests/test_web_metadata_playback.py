@@ -113,6 +113,18 @@ def test_review_page_explains_provider_id_formats(tmp_path):
     assert "Lookup All uses the disc-level provider ID fields first" in html
 
 
+def test_metadata_lookup_strip_shows_last_lookup_warning(tmp_path):
+    config = _config(tmp_path)
+    db, job_id, _source_id, _media = _job_with_source(tmp_path, config)
+    db.audit("metadata_lookup", "Metadata lookup found 0 candidate(s), applied 0 field(s)", job_id, {"warnings": ["HTTP Error 401: Unauthorized"]})
+
+    html = web.render_metadata_lookup_strip(db, config, job_id)
+
+    assert "Last lookup:" in html
+    assert "Metadata lookup found 0 candidate(s), applied 0 field(s)" in html
+    assert "HTTP Error 401: Unauthorized" in html
+
+
 def test_media_review_link_uses_http_stream_instead_of_file_uri(tmp_path):
     config = _config(tmp_path)
     db, _job_id, source_id, media = _job_with_source(tmp_path, config)

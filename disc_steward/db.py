@@ -998,7 +998,12 @@ class Database:
                     """,
                     (job_id,),
                 ).fetchall()
-        return [{key: row[key] for key in row.keys()} for row in rows]
+        events = []
+        for row in rows:
+            event = {key: row[key] for key in row.keys() if key != "payload_json"}
+            event["payload"] = json.loads(row["payload_json"] or "{}")
+            events.append(event)
+        return events
 
     def save_llm_request_response(self, job_id: int, provider: str, request: dict, response: dict) -> None:
         redacted_request = _redact_secrets(request)
