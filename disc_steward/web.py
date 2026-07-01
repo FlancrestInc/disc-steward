@@ -354,10 +354,16 @@ def render_job_review(
     error_html = ""
     if errors:
         error_html = "<div class='errors'>" + "".join(f"<p>{escape(error)}</p>" for error in errors) + "</div>"
-    groups_html = "\n".join(
-        f"<section><h2>{label}</h2>{''.join(render_file_card(config, row, decision, paths.get(decision.source_file_id)) for row, decision in grouped[key]) or '<p class=\"muted\">No files in this group.</p>'}</section>"
-        for key, label in GROUPS
-    )
+    group_sections = []
+    for key, label in GROUPS:
+        cards_html = "".join(
+            render_file_card(config, row, decision, paths.get(decision.source_file_id))
+            for row, decision in grouped[key]
+        )
+        if not cards_html:
+            cards_html = '<p class="muted">No files in this group.</p>'
+        group_sections.append(f"<section><h2>{label}</h2>{cards_html}</section>")
+    groups_html = "\n".join(group_sections)
     return page(
         f"Review Job {job_id}",
         f"""
