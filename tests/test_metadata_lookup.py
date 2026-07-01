@@ -16,6 +16,7 @@ def _config(tmp_path: Path) -> AppConfig:
     config.metadata.enabled = True
     config.metadata.providers["tmdb"] = MetadataProviderConfig(enabled=True, api_key="tmdb-key")
     config.metadata.providers["anilist"] = MetadataProviderConfig(enabled=True)
+    config.metadata.providers["mal"] = MetadataProviderConfig(enabled=True, api_key="mal-client-id")
     return config
 
 
@@ -140,6 +141,85 @@ def test_anilist_provider_maps_mal_id_lookup_to_anime_candidate():
     assert candidates[0].content_type == "anime"
 
 
+def test_mal_provider_maps_mal_id_lookup_to_anime_candidate():
+    assert hasattr(metadata, "MalProvider")
+    calls: list[tuple[str, dict[str, str]]] = []
+
+    def sender(url: str, _payload: dict | None = None, headers: dict[str, str] | None = None) -> dict:
+        calls.append((url, headers or {}))
+        return {
+            "id": 199,
+            "title": "Sen to Chihiro no Kamikakushi",
+            "alternative_titles": {"en": "Spirited Away", "ja": "千と千尋の神隠し"},
+            "start_date": "2001-07-20",
+            "num_episodes": 1,
+        }
+
+    provider = metadata.MalProvider(client_id="mal-client-id", sender=sender)
+
+    candidates = provider.lookup_by_ids(mal_id="malid-199")
+
+    assert "/anime/199?" in calls[0][0]
+    assert calls[0][1]["X-MAL-CLIENT-ID"] == "mal-client-id"
+    assert candidates[0].title == "Spirited Away"
+    assert candidates[0].mal_id == "199"
+    assert candidates[0].original_title == "千と千尋の神隠し"
+    assert candidates[0].romanized_title == "Sen to Chihiro no Kamikakushi"
+    assert candidates[0].content_type == "anime"
+
+
+def test_mal_provider_search_maps_first_result_to_candidate():
+    def sender(url: str, _payload: dict | None = None, _headers: dict[str, str] | None = None) -> dict:
+        assert "/anime?" in url
+        assert "q=Spirited+Away" in url
+        return {
+            "data": [
+                {
+                    "node": {
+                        "id": 199,
+                        "title": "Sen to Chihiro no Kamikakushi",
+                        "alternative_titles": {"en": "Spirited Away", "ja": "千と千尋の神隠し"},
+                        "start_date": "2001-07-20",
+                    }
+                }
+            ]
+        }
+
+    provider = metadata.MalProvider(client_id="mal-client-id", sender=sender)
+
+    candidates = provider.lookup("Spirited Away", 2001)
+
+    assert candidates[0].title == "Spirited Away"
+    assert candidates[0].mal_id == "199"
+    assert candidates[0].confidence == 0.92
+
+
+def test_lookup_job_metadata_includes_configured_mal_provider(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    disc = tmp_path / "DISC"
+    disc.mkdir()
+    job_id = db.upsert_job(disc)
+    db.save_job_review(JobReviewMetadata(job_id=job_id, title="Spirited Away", mal_id="199"))
+
+    class FakeMalProvider:
+        def __init__(self, client_id: str) -> None:
+            assert client_id == "mal-client-id"
+
+        def lookup_by_ids(self, **_kwargs):
+            return [MetadataCandidate(provider="mal", title="Spirited Away", year=2001, content_type="anime", mal_id="199", confidence=1.0)]
+
+        def lookup(self, _query: str, _year: int | None = None):
+            return []
+
+    monkeypatch.setattr(metadata, "MalProvider", FakeMalProvider)
+
+    result = metadata.lookup_job_metadata(db, config, job_id)
+
+    assert any(item["provider"] == "mal" and item["candidate_count"] == 1 for item in result.provider_results)
+
+
 def test_lookup_job_metadata_applies_high_confidence_candidate_to_blank_or_default_fields(tmp_path):
     config = _config(tmp_path)
     db = Database(tmp_path / "disc_steward.sqlite3")
@@ -209,6 +289,28 @@ def test_lookup_job_metadata_preserves_manual_fields_and_stores_ambiguous_candid
     assert db.list_metadata_candidates(job_id)[0]["title"] == "Possible Match"
 
 
+def test_lookup_job_metadata_records_provider_attributed_failures(tmp_path):
+    config = _config(tmp_path)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    disc = tmp_path / "DISC"
+    disc.mkdir()
+    job_id = db.upsert_job(disc)
+
+    result = metadata.lookup_job_metadata(
+        db,
+        config,
+        job_id,
+        providers=[("tmdb", lambda _db, _config, _job_id: (_ for _ in ()).throw(RuntimeError("HTTP Error 401: Unauthorized")))],
+    )
+
+    audit = db.list_audit_events(job_id)[-1]
+    assert result.provider_results == [{"provider": "tmdb", "candidate_count": 0, "status": "failed"}]
+    assert result.warnings == [{"provider": "tmdb", "message": "HTTP Error 401: Unauthorized"}]
+    assert audit["payload"]["provider_results"] == result.provider_results
+    assert audit["payload"]["warnings"] == result.warnings
+
+
 def test_lookup_job_metadata_fills_confident_episode_titles(tmp_path):
     config = _config(tmp_path)
     db = Database(tmp_path / "disc_steward.sqlite3")
@@ -247,6 +349,42 @@ def test_lookup_job_metadata_fills_confident_episode_titles(tmp_path):
     assert reviews[first].final_display_name == "Pilot"
     assert reviews[second].episode_number == 2
     assert reviews[second].final_display_name == "Second"
+
+
+def test_lookup_file_metadata_uses_file_ids_and_fills_only_that_file(tmp_path):
+    config = _config(tmp_path)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    disc = tmp_path / "DISC"
+    disc.mkdir()
+    job_id = db.upsert_job(disc)
+    source_id = db.upsert_source_file(job_id, _source(disc / "featurette.mkv"))
+    db.save_job_review(JobReviewMetadata(job_id=job_id, title="Disc Title", year=1999, content_type="movie", library_root="Movies"))
+    db.save_file_review(FileReviewDecision(source_file_id=source_id, tmdb_id="tmdbid-268"))
+
+    result = metadata.lookup_file_metadata(
+        db,
+        config,
+        job_id,
+        source_id,
+        providers=[
+            (
+                "tmdb",
+                lambda _db, _config, _job_id, _source_id: [
+                    MetadataCandidate(provider="tmdb", title="Batman", year=1989, content_type="movie", tmdb_id="268", confidence=1.0)
+                ],
+            )
+        ],
+    )
+
+    review = db.get_job_review(job_id)
+    decision = {item.source_file_id: item for item in db.list_file_reviews(job_id)}[source_id]
+    assert result.applied_fields == {f"file:{source_id}": ["content_type", "final_display_name"]}
+    assert review.title == "Disc Title"
+    assert review.year == 1999
+    assert decision.final_display_name == "Batman"
+    assert decision.content_type == "movie"
+    assert decision.tmdb_id == "tmdbid-268"
 
 
 def test_scan_metadata_lookup_failure_is_non_fatal(tmp_path):

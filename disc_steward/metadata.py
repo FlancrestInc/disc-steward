@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Callable
 from urllib.parse import urlencode, quote
 from urllib.request import Request, urlopen
@@ -39,7 +40,8 @@ class MetadataCandidate:
 class MetadataLookupResult:
     candidates: list[MetadataCandidate] = field(default_factory=list)
     applied_fields: dict[str, list[str]] = field(default_factory=dict)
-    warnings: list[str] = field(default_factory=list)
+    provider_results: list[dict[str, object]] = field(default_factory=list)
+    warnings: list[dict[str, str]] = field(default_factory=list)
 
 
 class MetadataProvider:
@@ -60,6 +62,7 @@ class ManualImdbProvider(MetadataProvider):
 
 
 JsonSender = Callable[[str, dict | None], dict]
+HeaderJsonSender = Callable[[str, dict | None, dict[str, str]], dict]
 
 
 class TmdbProvider(MetadataProvider):
@@ -217,6 +220,67 @@ class AniListProvider(MetadataProvider):
         )
 
 
+class MalProvider(MetadataProvider):
+    name = "mal"
+    base_url = "https://api.myanimelist.net/v2"
+
+    def __init__(self, client_id: str, sender: HeaderJsonSender | None = None) -> None:
+        self.client_id = client_id
+        self.sender = sender or _request_json_with_headers
+
+    def configured(self) -> bool:
+        return bool(self.client_id)
+
+    def lookup_by_ids(
+        self,
+        imdb_id: str | None = None,
+        tmdb_id: str | None = None,
+        anilist_id: str | None = None,
+        mal_id: str | None = None,
+    ) -> list[MetadataCandidate]:
+        mal_id = _numeric_provider_id(mal_id, "malid")
+        if not mal_id:
+            return []
+        data = self._get(f"/anime/{quote(mal_id)}", {"fields": _MAL_FIELDS})
+        return [self._candidate(data, confidence=1.0)] if data.get("id") else []
+
+    def lookup(self, query: str, year: int | None = None) -> list[MetadataCandidate]:
+        data = self._get("/anime", {"q": query, "limit": 5, "fields": _MAL_FIELDS})
+        candidates = []
+        for item in data.get("data") or []:
+            node = item.get("node") or {}
+            candidates.append(self._candidate(node, confidence=_match_confidence(query, year, _preferred_mal_title(node), node.get("start_date"))))
+        return candidates
+
+    def _get(self, path: str, params: dict[str, object]) -> dict:
+        return self.sender(
+            f"{self.base_url}{path}?{urlencode(params)}",
+            None,
+            {"X-MAL-CLIENT-ID": self.client_id},
+        )
+
+    def _candidate(self, item: dict, confidence: float) -> MetadataCandidate:
+        titles = item.get("alternative_titles") or {}
+        mal_id = str(item["id"]) if item.get("id") is not None else None
+        return MetadataCandidate(
+            provider=self.name,
+            provider_id=mal_id,
+            title=titles.get("en") or item.get("title") or titles.get("ja") or "",
+            original_title=titles.get("ja"),
+            romanized_title=item.get("title"),
+            translated_title=titles.get("en"),
+            year=_year_from_date(item.get("start_date")),
+            content_type="anime",
+            library_root="Anime",
+            mal_id=mal_id,
+            confidence=confidence,
+            raw=item,
+        )
+
+
+_MAL_FIELDS = "alternative_titles,start_date,num_episodes"
+
+
 _ANILIST_QUERY = """
 query ($id: Int, $idMal: Int, $search: String) {
   Media(id: $id, idMal: $idMal, search: $search, type: ANIME) {
@@ -234,13 +298,17 @@ def lookup_job_metadata(db, config, job_id: int, providers: list[Callable] | Non
     if not config.metadata.enabled:
         return MetadataLookupResult()
     candidates: list[MetadataCandidate] = []
-    warnings: list[str] = []
+    warnings: list[dict[str, str]] = []
+    provider_results: list[dict[str, object]] = []
     provider_callables = providers or _provider_callables(config)
-    for provider in provider_callables:
+    for provider_name, provider in _provider_entries(provider_callables):
         try:
-            candidates.extend(provider(db, config, job_id))
+            provider_candidates = provider(db, config, job_id)
+            candidates.extend(provider_candidates)
+            provider_results.append({"provider": provider_name, "candidate_count": len(provider_candidates), "status": "ok"})
         except Exception as error:
-            warnings.append(str(error))
+            provider_results.append({"provider": provider_name, "candidate_count": 0, "status": "failed"})
+            warnings.append({"provider": provider_name, "message": str(error)})
     db.clear_metadata_candidates(job_id)
     for candidate in candidates:
         db.save_metadata_candidate(job_id, candidate.provider, _candidate_payload(candidate))
@@ -252,9 +320,51 @@ def lookup_job_metadata(db, config, job_id: int, providers: list[Callable] | Non
         "metadata_lookup",
         f"Metadata lookup found {len(candidates)} candidate(s), applied {sum(len(value) for value in applied.values())} field(s)",
         job_id,
-        {"applied_fields": applied, "warnings": warnings},
+        {"applied_fields": applied, "provider_results": provider_results, "warnings": warnings},
     )
-    return MetadataLookupResult(candidates=candidates, applied_fields=applied, warnings=warnings)
+    return MetadataLookupResult(candidates=candidates, applied_fields=applied, provider_results=provider_results, warnings=warnings)
+
+
+def lookup_file_metadata(
+    db,
+    config,
+    job_id: int,
+    source_file_id: int,
+    providers: list[Callable] | None = None,
+) -> MetadataLookupResult:
+    if not config.metadata.enabled:
+        return MetadataLookupResult()
+    candidates: list[MetadataCandidate] = []
+    warnings: list[dict[str, str]] = []
+    provider_results: list[dict[str, object]] = []
+    provider_callables = providers or _file_provider_callables(config)
+    for provider_name, provider in _provider_entries(provider_callables):
+        try:
+            provider_candidates = provider(db, config, job_id, source_file_id)
+            candidates.extend(provider_candidates)
+            provider_results.append({"provider": provider_name, "candidate_count": len(provider_candidates), "status": "ok"})
+        except Exception as error:
+            provider_results.append({"provider": provider_name, "candidate_count": 0, "status": "failed"})
+            warnings.append({"provider": provider_name, "message": str(error)})
+    db.clear_metadata_candidates(job_id, source_file_id)
+    for candidate in candidates:
+        db.save_metadata_candidate(job_id, candidate.provider, _candidate_payload(candidate), source_file_id)
+    best = _best_auto_candidate(candidates)
+    applied: dict[str, list[str]] = {}
+    if best is not None:
+        applied = _apply_file_candidate(db, config, job_id, source_file_id, best)
+    db.audit(
+        "metadata_lookup",
+        f"Metadata lookup for file {source_file_id} found {len(candidates)} candidate(s), applied {sum(len(value) for value in applied.values())} field(s)",
+        job_id,
+        {
+            "source_file_id": source_file_id,
+            "applied_fields": applied,
+            "provider_results": provider_results,
+            "warnings": warnings,
+        },
+    )
+    return MetadataLookupResult(candidates=candidates, applied_fields=applied, provider_results=provider_results, warnings=warnings)
 
 
 def _provider_callables(config) -> list[Callable]:
@@ -262,12 +372,43 @@ def _provider_callables(config) -> list[Callable]:
     tmdb = config.metadata.providers.get("tmdb")
     if tmdb and _configured("tmdb", tmdb.enabled, tmdb.api_key):
         provider = TmdbProvider(tmdb.api_key)
-        callables.append(lambda db, config, job_id, provider=provider: _lookup_with_provider(db, job_id, provider))
+        callables.append(("tmdb", lambda db, config, job_id, provider=provider: _lookup_with_provider(db, job_id, provider)))
     anilist = config.metadata.providers.get("anilist")
     if anilist and _configured("anilist", anilist.enabled, anilist.api_key):
         provider = AniListProvider()
-        callables.append(lambda db, config, job_id, provider=provider: _lookup_with_provider(db, job_id, provider))
+        callables.append(("anilist", lambda db, config, job_id, provider=provider: _lookup_with_provider(db, job_id, provider)))
+    mal = config.metadata.providers.get("mal")
+    if mal and _configured("mal", mal.enabled, mal.api_key):
+        provider = MalProvider(mal.api_key)
+        callables.append(("mal", lambda db, config, job_id, provider=provider: _lookup_with_provider(db, job_id, provider)))
     return callables
+
+
+def _file_provider_callables(config) -> list[Callable]:
+    callables = []
+    tmdb = config.metadata.providers.get("tmdb")
+    if tmdb and _configured("tmdb", tmdb.enabled, tmdb.api_key):
+        provider = TmdbProvider(tmdb.api_key)
+        callables.append(("tmdb", lambda db, config, job_id, source_file_id, provider=provider: _lookup_file_with_provider(db, job_id, source_file_id, provider)))
+    anilist = config.metadata.providers.get("anilist")
+    if anilist and _configured("anilist", anilist.enabled, anilist.api_key):
+        provider = AniListProvider()
+        callables.append(("anilist", lambda db, config, job_id, source_file_id, provider=provider: _lookup_file_with_provider(db, job_id, source_file_id, provider)))
+    mal = config.metadata.providers.get("mal")
+    if mal and _configured("mal", mal.enabled, mal.api_key):
+        provider = MalProvider(mal.api_key)
+        callables.append(("mal", lambda db, config, job_id, source_file_id, provider=provider: _lookup_file_with_provider(db, job_id, source_file_id, provider)))
+    return callables
+
+
+def _provider_entries(providers: list[Callable]) -> list[tuple[str, Callable]]:
+    entries = []
+    for index, provider in enumerate(providers, start=1):
+        if isinstance(provider, tuple):
+            entries.append((str(provider[0]), provider[1]))
+        else:
+            entries.append((getattr(provider, "name", f"provider_{index}"), provider))
+    return entries
 
 
 def _lookup_with_provider(db, job_id: int, provider: MetadataProvider) -> list[MetadataCandidate]:
@@ -290,8 +431,51 @@ def _lookup_with_provider(db, job_id: int, provider: MetadataProvider) -> list[M
     return candidates
 
 
+def _lookup_file_with_provider(db, job_id: int, source_file_id: int, provider: MetadataProvider) -> list[MetadataCandidate]:
+    job = db.get_job(job_id)
+    review = db.get_job_review(job_id)
+    row = db.source_file_payload(source_file_id)
+    if row is None or int(row["job_id"]) != job_id:
+        return []
+    decisions = {decision.source_file_id: decision for decision in db.list_file_reviews(job_id)}
+    decision = decisions.get(source_file_id) or FileReviewDecision(source_file_id=source_file_id)
+    candidates: list[MetadataCandidate] = []
+    lookup_by_ids = getattr(provider, "lookup_by_ids", None)
+    if lookup_by_ids:
+        candidates.extend(
+            lookup_by_ids(
+                imdb_id=decision.imdb_id or review.imdb_id,
+                tmdb_id=decision.tmdb_id or review.tmdb_id,
+                anilist_id=decision.anilist_id or review.anilist_id,
+                mal_id=decision.mal_id or review.mal_id,
+            )
+        )
+    query = _file_lookup_query(job.disc_title if job else "", review, decision, row)
+    if query:
+        candidates.extend(provider.lookup(query, review.year))
+    return candidates
+
+
 def _lookup_query(job_title: str, review: JobReviewMetadata, rows: list[dict]) -> str:
     for value in [review.title, *(row.get("embedded_title") for row in rows), *(row.get("makemkv_title") for row in rows), job_title]:
+        if value:
+            return str(value)
+    return ""
+
+
+def _file_lookup_query(job_title: str, review: JobReviewMetadata, decision: FileReviewDecision, row: dict) -> str:
+    filename_stem = Path(row["filename"]).stem
+    for value in [
+        decision.final_display_name,
+        decision.translated_title,
+        decision.romanized_title,
+        decision.original_title,
+        row.get("embedded_title"),
+        row.get("makemkv_title"),
+        filename_stem,
+        review.title,
+        job_title,
+    ]:
         if value:
             return str(value)
     return ""
@@ -351,6 +535,40 @@ def _apply_candidate(db, config, job_id: int, candidate: MetadataCandidate) -> d
     return applied
 
 
+def _apply_file_candidate(db, config, job_id: int, source_file_id: int, candidate: MetadataCandidate) -> dict[str, list[str]]:
+    row = db.source_file_payload(source_file_id)
+    if row is None or int(row["job_id"]) != job_id:
+        return {}
+    decisions = {decision.source_file_id: decision for decision in db.list_file_reviews(job_id)}
+    decision = decisions.get(source_file_id) or FileReviewDecision(source_file_id=source_file_id)
+    fields: list[str] = []
+    filename_stem = Path(row["filename"]).stem
+
+    def set_file(field_name: str, value: object, *, default_display_name: bool = False) -> None:
+        if value in {None, ""}:
+            return
+        current = getattr(decision, field_name)
+        can_fill = current in {None, "", "unknown"}
+        if default_display_name and current == filename_stem:
+            can_fill = True
+        if can_fill:
+            setattr(decision, field_name, value)
+            fields.append(field_name)
+
+    display_name = candidate.translated_title or candidate.romanized_title or candidate.title
+    set_file("content_type", candidate.content_type)
+    set_file("final_display_name", display_name, default_display_name=True)
+    set_file("original_title", candidate.original_title or candidate.japanese_title)
+    set_file("translated_title", candidate.translated_title)
+    set_file("romanized_title", candidate.romanized_title)
+    for field_name in ["imdb_id", "tmdb_id", "tvdb_id", "anidb_id", "anilist_id", "mal_id"]:
+        set_file(field_name, getattr(candidate, field_name))
+    if fields:
+        db.save_file_review(decision)
+        return {f"file:{source_file_id}": fields}
+    return {}
+
+
 def _apply_episode_fields(
     decision: FileReviewDecision,
     candidate: MetadataCandidate,
@@ -396,6 +614,16 @@ def _request_json(url: str, payload: dict | None = None) -> dict:
         return json.loads(response.read().decode("utf-8") or "{}")
 
 
+def _request_json_with_headers(url: str, payload: dict | None = None, headers: dict[str, str] | None = None) -> dict:
+    if payload is None:
+        request = Request(url, headers=headers or {})
+    else:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(url, data=data, headers={"Content-Type": "application/json", **(headers or {})}, method="POST")
+    with urlopen(request, timeout=30) as response:  # noqa: S310 - provider URL is fixed
+        return json.loads(response.read().decode("utf-8") or "{}")
+
+
 def _year_from_date(value: str | None) -> int | None:
     if not value:
         return None
@@ -419,6 +647,11 @@ def _normalize(value: str | None) -> str:
 def _preferred_anilist_title(media: dict) -> str:
     title = media.get("title") or {}
     return title.get("english") or title.get("romaji") or title.get("native") or ""
+
+
+def _preferred_mal_title(item: dict) -> str:
+    titles = item.get("alternative_titles") or {}
+    return titles.get("en") or item.get("title") or titles.get("ja") or ""
 
 
 def _int_or_none(value: str | None) -> int | None:

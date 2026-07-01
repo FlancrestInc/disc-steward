@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 from disc_steward.config import AppConfig, MetadataProviderConfig
 from disc_steward.db import Database
 from disc_steward.metadata import MetadataCandidate, MetadataLookupResult
-from disc_steward.models import AudioStream, ScannedFile, VideoInfo
+from disc_steward.models import AudioStream, FileReviewDecision, ScannedFile, VideoInfo
 from disc_steward import web
 
 
@@ -16,6 +16,7 @@ def _config(tmp_path: Path) -> AppConfig:
     config = AppConfig.default_for_root(tmp_path)
     config.metadata.enabled = True
     config.metadata.providers["tmdb"] = MetadataProviderConfig(enabled=True, api_key="tmdb-key")
+    config.metadata.providers["mal"] = MetadataProviderConfig(enabled=True, api_key="mal-client-id")
     return config
 
 
@@ -100,6 +101,17 @@ def test_review_page_renders_lookup_button_and_inline_player(tmp_path):
     assert f"/media/{source_id}" in html
     assert "<video" in html
     assert "External player path" in html
+    assert "mal:ready" in html
+
+
+def test_review_page_renders_per_file_lookup_button(tmp_path):
+    config = _config(tmp_path)
+    db, job_id, source_id, _media = _job_with_source(tmp_path, config)
+
+    html = web.render_job_review(db, config, job_id)
+
+    assert "Lookup File" in html
+    assert f'formaction="/jobs/{job_id}/lookup-file-metadata-{source_id}"' in html
 
 
 def test_review_page_explains_provider_id_formats(tmp_path):
@@ -116,13 +128,68 @@ def test_review_page_explains_provider_id_formats(tmp_path):
 def test_metadata_lookup_strip_shows_last_lookup_warning(tmp_path):
     config = _config(tmp_path)
     db, job_id, _source_id, _media = _job_with_source(tmp_path, config)
-    db.audit("metadata_lookup", "Metadata lookup found 0 candidate(s), applied 0 field(s)", job_id, {"warnings": ["HTTP Error 401: Unauthorized"]})
+    db.audit(
+        "metadata_lookup",
+        "Metadata lookup found 0 candidate(s), applied 0 field(s)",
+        job_id,
+        {
+            "provider_results": [{"provider": "tmdb", "candidate_count": 0, "status": "failed"}],
+            "warnings": [{"provider": "tmdb", "message": "HTTP Error 401: Unauthorized"}],
+        },
+    )
 
     html = web.render_metadata_lookup_strip(db, config, job_id)
 
     assert "Last lookup:" in html
     assert "Metadata lookup found 0 candidate(s), applied 0 field(s)" in html
-    assert "HTTP Error 401: Unauthorized" in html
+    assert "tmdb: 0 candidate(s), failed" in html
+    assert "tmdb: HTTP Error 401: Unauthorized" in html
+
+
+def test_lookup_file_metadata_action_saves_current_form_before_applying_lookup(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    db, job_id, source_id, _media = _job_with_source(tmp_path, config)
+    seen_display_name = None
+
+    def fake_lookup(db_arg, _config, job_id_arg, source_id_arg):
+        nonlocal seen_display_name
+        assert job_id_arg == job_id
+        assert source_id_arg == source_id
+        decision = {item.source_file_id: item for item in db_arg.list_file_reviews(job_id_arg)}[source_id_arg]
+        seen_display_name = decision.final_display_name
+        decision.content_type = "movie"
+        db_arg.save_file_review(decision)
+        return MetadataLookupResult(
+            candidates=[MetadataCandidate(provider="tmdb", title="Batman", tmdb_id="268", confidence=1.0)],
+            applied_fields={f"file:{source_id}": ["content_type"]},
+        )
+
+    monkeypatch.setattr(web, "lookup_file_metadata", fake_lookup)
+
+    message = web.handle_job_action(
+        db,
+        config,
+        job_id,
+        f"lookup-file-metadata-{source_id}",
+        {
+            "title": "Typed Disc",
+            "content_type": "movie",
+            "library_root": "Movies",
+            f"file_{source_id}_include": "on",
+            f"file_{source_id}_role": "main_feature",
+            f"file_{source_id}_content_type": "unknown",
+            f"file_{source_id}_final_display_name": "Typed File",
+            f"file_{source_id}_encoding_profile": config.preferred_video_profile,
+            f"file_{source_id}_subtitle_policy": "preserve_existing",
+        },
+    )
+
+    decision = {item.source_file_id: item for item in db.list_file_reviews(job_id)}[source_id]
+    assert message == f"metadata-file-lookup:{source_id}:1"
+    assert seen_display_name == "Typed File"
+    assert db.get_job_review(job_id).title == "Typed Disc"
+    assert decision.final_display_name == "Typed File"
+    assert decision.content_type == "movie"
 
 
 def test_media_review_link_uses_http_stream_instead_of_file_uri(tmp_path):

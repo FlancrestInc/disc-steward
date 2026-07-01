@@ -233,7 +233,7 @@ When enabled with `refresh_after_import: true`, Disc Steward triggers a full lib
 
 ## Metadata and Japanese/Anime Handling
 
-Metadata lookup is optional and disabled by default. V1 provider-backed lookup supports TMDb for movies/shows and AniList for anime. IMDb IDs are accepted as input and resolved through TMDb external-ID lookup; AniList can resolve AniList and MAL IDs. TVDb, AniDB, and MAL config entries remain reserved for future direct providers. No API keys are hardcoded, provider failures do not fail scans, and offline/manual review remains the default path.
+Metadata lookup is optional and disabled by default. Provider-backed lookup supports TMDb for movies/shows and AniList/MAL for anime. IMDb IDs are accepted as input and resolved through TMDb external-ID lookup; AniList can resolve AniList and MAL IDs; MAL can resolve MAL IDs and title searches using a configured MAL client ID. TVDb and AniDB config entries remain reserved for future direct providers. No API keys are hardcoded, provider failures do not fail scans, and offline/manual review remains the default path.
 
 The review model stores original, romanized, and translated title fields plus Japanese/anime flags and language/script hints. Filenames can stay English while original Japanese titles remain in metadata. Disc Steward preserves Unicode safely, warns when Japanese/anime content is detected, preserves ASS subtitles by default when styling may matter, and recommends SRT fallback rather than replacing ASS. It does not auto-translate metadata without review.
 

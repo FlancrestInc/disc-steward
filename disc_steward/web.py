@@ -12,7 +12,7 @@ from .config import AppConfig
 from .cleanup import plan_cleanup
 from .db import Database
 from .llm import request_suggestions
-from .metadata import lookup_job_metadata, metadata_provider_status
+from .metadata import lookup_file_metadata, lookup_job_metadata, metadata_provider_status
 from .models import AudioStream, Classification, FileReviewDecision, JobReviewMetadata, ScannedFile, SubtitleStream, VideoInfo
 from .review import ReviewValidationError, classification_from_json, suggest_subtitle_policy, validate_review_ready
 from .status import build_status_summary, format_status_summary
@@ -211,6 +211,14 @@ def _write_media_range(path: Path, writer, start: int, length: int) -> bool:
 
 
 def handle_job_action(db: Database, config: AppConfig, job_id: int, action: str, form: dict[str, str]) -> str:
+    if action.startswith("lookup-file-metadata-"):
+        source_file_id = int(action.removeprefix("lookup-file-metadata-"))
+        job_review, decisions = parse_review_form(db, config, job_id, form, "review_in_progress")
+        db.save_job_review(job_review)
+        for decision in decisions:
+            db.save_file_review(decision)
+        result = lookup_file_metadata(db, config, job_id, source_file_id)
+        return f"metadata-file-lookup:{source_file_id}:{len(result.candidates)}"
     if action == "lookup-metadata":
         job_review, decisions = parse_review_form(db, config, job_id, form, "review_in_progress")
         db.save_job_review(job_review)
@@ -448,7 +456,7 @@ def render_job_review(
     group_sections = []
     for key, label in GROUPS:
         cards_html = "".join(
-            render_file_card(config, row, decision, paths.get(decision.source_file_id))
+            render_file_card(config, job_id, row, decision, paths.get(decision.source_file_id))
             for row, decision in grouped[key]
         )
         if not cards_html:
@@ -584,7 +592,6 @@ def render_metadata_lookup_strip(db: Database, config: AppConfig, job_id: int) -
     provider_bits = [
         f"{escape(name)}:{'ready' if details['configured'] else 'off'}"
         for name, details in metadata_status["providers"].items()
-        if name in {"tmdb", "anilist"}
     ]
     candidate_bits = []
     for candidate in candidates[:5]:
@@ -596,9 +603,13 @@ def render_metadata_lookup_strip(db: Database, config: AppConfig, job_id: int) -
     candidates_html = " · ".join(candidate_bits) if candidate_bits else "No stored metadata candidates."
     last_lookup_html = ""
     if last_lookup:
-        warnings = last_lookup.get("payload", {}).get("warnings") or []
-        warnings_html = "".join(f"<span class='errors'>{escape(str(warning))}</span>" for warning in warnings)
-        last_lookup_html = f"<p class='wide muted'><strong>Last lookup:</strong> {escape(last_lookup.get('message') or '')}</p>{warnings_html}"
+        payload = last_lookup.get("payload", {})
+        provider_results = payload.get("provider_results") or []
+        provider_html = " · ".join(_metadata_provider_result_text(result) for result in provider_results)
+        provider_html = f"<p class='wide muted'>{escape(provider_html)}</p>" if provider_html else ""
+        warnings = payload.get("warnings") or []
+        warnings_html = "".join(f"<span class='errors'>{escape(_metadata_warning_text(warning))}</span>" for warning in warnings)
+        last_lookup_html = f"<p class='wide muted'><strong>Last lookup:</strong> {escape(last_lookup.get('message') or '')}</p>{provider_html}{warnings_html}"
     disabled = "disabled" if not metadata_status["enabled"] else ""
     return f"""
     <section class="lookup-strip">
@@ -618,7 +629,24 @@ def _last_metadata_lookup_event(db: Database, job_id: int) -> dict | None:
     return events[-1] if events else None
 
 
-def render_file_card(config: AppConfig, row: dict, decision: FileReviewDecision, generated) -> str:
+def _metadata_provider_result_text(result: object) -> str:
+    if not isinstance(result, dict):
+        return str(result)
+    provider = result.get("provider") or "provider"
+    count = result.get("candidate_count", 0)
+    status = result.get("status") or "unknown"
+    return f"{provider}: {count} candidate(s), {status}"
+
+
+def _metadata_warning_text(warning: object) -> str:
+    if not isinstance(warning, dict):
+        return str(warning)
+    provider = warning.get("provider") or "provider"
+    message = warning.get("message") or ""
+    return f"{provider}: {message}"
+
+
+def render_file_card(config: AppConfig, job_id: int, row: dict, decision: FileReviewDecision, generated) -> str:
     source_id = row["id"]
     prefix = f"file_{source_id}_"
     classification = classification_from_json(row.get("classification_json"))
@@ -636,6 +664,7 @@ def render_file_card(config: AppConfig, row: dict, decision: FileReviewDecision,
     return f"""
     <article class="file-card">
       <h3>{escape(row['filename'])}</h3>
+      <p><button formaction="/jobs/{job_id}/lookup-file-metadata-{source_id}">Lookup File</button></p>
       <p class="muted"><strong>Controller path:</strong> <code>{escape(row['path'])}</code></p>
       {_mapped_path_line('Barnabas path', config.to_barnabas_path(Path(row['path'])), Path(row['path']))}
       {render_media_review_controls(config, row)}

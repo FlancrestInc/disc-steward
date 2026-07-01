@@ -116,6 +116,7 @@ metadata:
       api_key: ""
     mal:
       enabled: false
+      # MyAnimeList public API client ID, sent as X-MAL-CLIENT-ID.
       api_key: ""
 
 llm:

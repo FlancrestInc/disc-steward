@@ -953,9 +953,15 @@ class Database:
                 (job_id, source_file_id, provider, json.dumps(candidate, ensure_ascii=False)),
             )
 
-    def clear_metadata_candidates(self, job_id: int) -> None:
+    def clear_metadata_candidates(self, job_id: int, source_file_id: int | None = None) -> None:
         with self.connect() as conn:
-            conn.execute("DELETE FROM metadata_candidates WHERE job_id = ?", (job_id,))
+            if source_file_id is None:
+                conn.execute("DELETE FROM metadata_candidates WHERE job_id = ?", (job_id,))
+            else:
+                conn.execute(
+                    "DELETE FROM metadata_candidates WHERE job_id = ? AND source_file_id = ?",
+                    (job_id, source_file_id),
+                )
 
     def list_metadata_candidates(self, job_id: int) -> list[dict]:
         with self.connect() as conn:
