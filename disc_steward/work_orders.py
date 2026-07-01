@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import AppConfig
@@ -295,7 +295,7 @@ def create_fileflows_work_orders(db, config: AppConfig, job_id: int) -> Path:
     job_dir = config.fileflows_work_order_path / f"job_{job_id}"
     items_dir = job_dir / "items"
     items_dir.mkdir(parents=True, exist_ok=True)
-    created = datetime.now(UTC).isoformat()
+    created = datetime.now(timezone.utc).isoformat()
     item_paths: list[Path] = []
     warnings: list[str] = []
     for index, decision in enumerate(included, start=1):

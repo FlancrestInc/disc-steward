@@ -35,3 +35,17 @@ def test_web_fstrings_are_compatible_with_pre_312_python() -> None:
             offenders.append((tok.start[0], tok.string))
 
     assert offenders == []
+
+
+def test_datetime_utc_constant_is_not_imported() -> None:
+    for path in Path("disc_steward").glob("*.py"):
+        tree = ast.parse(path.read_text())
+        offenders = [
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "datetime"
+            for alias in node.names
+            if alias.name == "UTC"
+        ]
+
+        assert offenders == [], f"{path} imports datetime.UTC, which is unavailable on Python 3.10"
