@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from .config import AppConfig
 from .models import AudioStream, FileReviewDecision, GeneratedPath, JobReviewMetadata, ReviewDecision, ScannedFile, SubtitleStream, VideoInfo
+from .review import validate_review_ready
 from .subtitle_planner import generate_subtitle_plan, plan_to_dict
-
 
 INVALID_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 METADATA_FILENAME_KEYS = (
@@ -32,6 +34,9 @@ EXTRA_ROLES = {
     "alternate_cut",
     "commentary_variant",
 }
+TEXT_SUBTITLE_CODECS = {"subrip", "srt", "webvtt", "mov_text"}
+ASS_SUBTITLE_CODECS = {"ass", "ssa"}
+MUXABLE_SUBTITLE_CODECS = TEXT_SUBTITLE_CODECS | ASS_SUBTITLE_CODECS
 
 
 def sanitize_filename_component(value: str | None) -> str:
@@ -179,7 +184,48 @@ def _metadata_ids(job: JobReviewMetadata, decision: FileReviewDecision) -> dict[
     return {key: value for key, value in pairs.items() if value}
 
 
-def build_fileflows_item_payload(
+def _subtitle_streams_for_mux(source: ScannedFile) -> list[SubtitleStream]:
+    return [stream for stream in source.subtitle_streams if (stream.codec or "").lower() in MUXABLE_SUBTITLE_CODECS]
+
+
+def _subtitle_warning_messages(source: ScannedFile) -> list[str]:
+    warnings: list[str] = []
+    image_streams = [stream for stream in source.subtitle_streams if (stream.codec or "").lower() not in MUXABLE_SUBTITLE_CODECS]
+    if image_streams:
+        warnings.append("image subtitle streams were detected and are not converted by the ffmpeg fallback path")
+    if any((stream.codec or "").lower() in ASS_SUBTITLE_CODECS for stream in source.subtitle_streams):
+        warnings.append("ASS/SSA subtitles are preserved by the ffmpeg fallback path and converted to SRT when mapped")
+    return warnings
+
+
+def _build_ffmpeg_command(config: AppConfig, source: ScannedFile, decision: FileReviewDecision, output_path: Path) -> list[str]:
+    profile = (decision.encoding_profile or "").strip() or "universal_h264_aac_srt"
+    command = [config.ffmpeg_path, "-hide_banner", "-y", "-nostdin", "-i", str(source.path), "-map_metadata", "0", "-map_chapters", "0"]
+    subtitles = _subtitle_streams_for_mux(source)
+    if profile == "remux_only":
+        command.extend(["-map", "0", "-c", "copy"])
+    else:
+        command.extend(["-map", "0:v:0", "-map", "0:a?"])
+        if profile == "subtitle_fix_only":
+            command.extend(["-c:v", "copy", "-c:a", "copy"])
+        elif profile == "h265_archive_friendly":
+            command.extend(["-c:v", "libx265", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p10le", "-c:a", "aac", "-b:a", "192k"])
+        else:
+            command.extend(["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k"])
+        if subtitles:
+            for subtitle in subtitles:
+                command.extend(["-map", f"0:{subtitle.index}"])
+            if profile == "subtitle_fix_only":
+                command.extend(["-c:s", "copy"])
+            else:
+                command.extend(["-c:s", "srt"])
+        else:
+            command.append("-sn")
+    command.append(str(output_path))
+    return command
+
+
+def build_ffmpeg_item_payload(
     config: AppConfig,
     job_id: int,
     item_id: int,
@@ -213,7 +259,10 @@ def build_fileflows_item_payload(
             "warnings": ["source stream details were unavailable when the subtitle plan was generated"],
         }
     )
-    return {
+    warnings = list(getattr(decision, "warnings", []))
+    if source is not None:
+        warnings.extend(_subtitle_warning_messages(source))
+    payload = {
         "job_id": job_id,
         "item_id": item_id,
         "source_path": str(config.to_barnabas_path(source_path)),
@@ -233,111 +282,17 @@ def build_fileflows_item_payload(
         "final_library_path": str(final_path),
         "preserve_original_audio": True,
         "preserve_original_subtitles": True,
+        "processing_engine": "ffmpeg",
+        "warnings": warnings,
         "created_by": "disc-steward",
     }
+    if source is not None:
+        payload["ffmpeg_command"] = _build_ffmpeg_command(config, source, decision, config.to_barnabas_path(config.validation_needed_path / f"job_{job_id}") / final_path.name)
+    return payload
 
 
-def build_work_order_payload(config: AppConfig, job_id: int, source_path: Path, decision: ReviewDecision) -> dict:
-    final_path = build_final_library_path(config, decision)
-    return {
-        "job_id": job_id,
-        "source_path": str(config.to_barnabas_path(source_path)),
-        "content_type": decision.content_type,
-        "role": decision.role,
-        "title": decision.title,
-        "year": decision.year,
-        "metadata_ids": {
-            "imdb": decision.imdb_id,
-            "tmdb": decision.tmdb_id,
-            "tvdb": decision.tvdb_id,
-            "anidb": decision.anidb_id,
-            "anilist": decision.anilist_id,
-            "mal": decision.mal_id,
-        },
-        "profile": decision.encoding_profile,
-        "subtitle_policy": decision.subtitle_policy,
-        "output_name": final_path.name,
-        "final_library_path": str(final_path),
-    }
-
-
-def write_work_order(config: AppConfig, job_id: int, source_path: Path, decision: ReviewDecision, dry_run: bool = True) -> Path:
-    job_dir = config.fileflows_work_order_path / f"job_{job_id}"
-    work_order_path = job_dir / "work_order.json"
-    if dry_run:
-        return work_order_path
-    job_dir.mkdir(parents=True, exist_ok=True)
-    work_order_path.write_text(json.dumps(build_work_order_payload(config, job_id, source_path, decision), indent=2), encoding="utf-8")
-    return work_order_path
-
-
-def create_fileflows_work_orders(db, config: AppConfig, job_id: int) -> Path:
-    from .review import validate_review_ready
-
-    job = db.get_job(job_id)
-    if job is None:
-        raise ValueError(f"Unknown job_id: {job_id}")
-    job_review = db.get_job_review(job_id)
-    if job_review.review_status not in {"reviewed", "ready_for_fileflows", "fileflows_work_orders_created"}:
-        raise ValueError("job must be reviewed before FileFlows work orders can be created")
-    decisions = db.list_file_reviews(job_id)
-    paths = generate_final_paths(config, job_review, decisions)
-    validate_review_ready(job_review, decisions, paths)
-    for decision in decisions:
-        generated = paths.get(decision.source_file_id)
-        if generated:
-            decision.generated_final_path = str(generated.final_path)
-            decision.conflicts = generated.conflicts
-            db.save_file_review(decision)
-
-    included = [decision for decision in decisions if decision.include_in_work_order]
-    source_rows = {row["id"]: row for row in db.source_file_payloads(job_id)}
-    job_dir = config.fileflows_work_order_path / f"job_{job_id}"
-    items_dir = job_dir / "items"
-    items_dir.mkdir(parents=True, exist_ok=True)
-    created = datetime.now(timezone.utc).isoformat()
-    item_paths: list[Path] = []
-    warnings: list[str] = []
-    for index, decision in enumerate(included, start=1):
-        row = source_rows[decision.source_file_id]
-        payload = build_fileflows_item_payload(
-            config,
-            job_id,
-            decision.source_file_id,
-            Path(row["path"]),
-            job_review,
-            decision,
-            _source_from_row(row),
-        )
-        item_path = items_dir / f"item_{index:03d}.work_order.json"
-        item_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        db.save_work_order_record(job_id, decision.source_file_id, str(item_path), payload)
-        db.save_subtitle_plan(decision.source_file_id, payload["subtitle_plan"])
-        item_paths.append(item_path)
-        warnings.extend(decision.warnings)
-
-    excluded_count = len([decision for decision in decisions if not decision.include_in_work_order])
-    manifest = {
-        "job_id": job_id,
-        "disc_folder": job.disc_title,
-        "disc_path": str(config.to_barnabas_path(Path(job.disc_path))),
-        "controller_disc_path": job.disc_path,
-        "parent_title": job_review.title,
-        "year": job_review.year,
-        "content_type": job_review.content_type,
-        "created_time": created,
-        "included_items": len(included),
-        "excluded_ignored_items": excluded_count,
-        "target_library_root": job_review.library_root,
-        "warnings": [*job_review.warnings, *warnings],
-        "notes": job_review.notes,
-        "items": [str(config.to_barnabas_path(path)) for path in item_paths],
-        "todo": "Expose this folder to FileFlows or a reviewed watched-folder script; Disc Steward does not call FileFlows directly.",
-    }
-    (job_dir / "job_manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
-    db.mark_work_orders_created(job_id, str(job_dir), created)
-    db.audit("work_orders_created", f"Created {len(item_paths)} FileFlows work order(s)", job_id, {"folder": str(job_dir)})
-    return job_dir
+# Legacy name kept for compatibility with older tests and callers.
+build_fileflows_item_payload = build_ffmpeg_item_payload
 
 
 def _source_from_row(row: dict) -> ScannedFile:
@@ -357,3 +312,106 @@ def _source_from_row(row: dict) -> ScannedFile:
         makemkv_title=row["makemkv_title"],
         raw_ffprobe=json.loads(row["raw_ffprobe_json"] or "{}"),
     )
+
+
+def _run_ffmpeg(command: list[str], runner: Callable[[list[str]], object] | None = None) -> None:
+    if runner is None:
+        subprocess.run(command, check=True)
+        return
+    runner(command)
+
+
+def create_ffmpeg_processing_jobs(
+    db,
+    config: AppConfig,
+    job_id: int,
+    ffmpeg_runner: Callable[[list[str]], object] | None = None,
+) -> Path:
+    job = db.get_job(job_id)
+    if job is None:
+        raise ValueError(f"Unknown job_id: {job_id}")
+    job_review = db.get_job_review(job_id)
+    if job_review.review_status not in {"reviewed", "ready_for_fileflows", "fileflows_work_orders_created", "ready_for_processing"}:
+        raise ValueError("job must be reviewed before processing outputs can be created")
+    decisions = db.list_file_reviews(job_id)
+    paths = generate_final_paths(config, job_review, decisions)
+    validate_review_ready(job_review, decisions, paths)
+    for decision in decisions:
+        generated = paths.get(decision.source_file_id)
+        if generated:
+            decision.generated_final_path = str(generated.final_path)
+            decision.conflicts = generated.conflicts
+            db.save_file_review(decision)
+
+    included = [decision for decision in decisions if decision.include_in_work_order]
+    source_rows = {row["id"]: row for row in db.source_file_payloads(job_id)}
+    job_dir = config.fileflows_work_order_path / f"job_{job_id}"
+    items_dir = job_dir / "items"
+    items_dir.mkdir(parents=True, exist_ok=True)
+    created = datetime.now(timezone.utc).isoformat()
+    item_paths: list[Path] = []
+    warnings: list[str] = []
+    run_ffmpeg = ffmpeg_runner or (lambda command: subprocess.run(command, check=True))
+    processing_status = "validation_needed"
+    for index, decision in enumerate(included, start=1):
+        row = source_rows[decision.source_file_id]
+        source = _source_from_row(row)
+        payload = build_ffmpeg_item_payload(
+            config,
+            job_id,
+            decision.source_file_id,
+            Path(row["path"]),
+            job_review,
+            decision,
+            source,
+        )
+        item_path = items_dir / f"item_{index:03d}.process.json"
+        item_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        db.save_work_order_record(job_id, decision.source_file_id, str(item_path), payload, status="planned" if config.dry_run else "processed")
+        db.save_subtitle_plan(decision.source_file_id, payload["subtitle_plan"])
+        item_paths.append(item_path)
+        warnings.extend(decision.warnings)
+        warnings.extend(payload.get("warnings", []))
+        if not config.dry_run:
+            output_path = Path(payload["barnabas_validation_output_dir"]) / payload["output_name"]
+            if output_path.exists() and not config.overwrite_existing:
+                raise FileExistsError(f"output already exists: {output_path}")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            _run_ffmpeg(payload["ffmpeg_command"], run_ffmpeg)
+            if not output_path.exists():
+                raise RuntimeError(f"ffmpeg did not create expected output: {output_path}")
+    manifest = {
+        "job_id": job_id,
+        "disc_folder": job.disc_title,
+        "disc_path": str(config.to_barnabas_path(Path(job.disc_path))),
+        "controller_disc_path": job.disc_path,
+        "parent_title": job_review.title,
+        "year": job_review.year,
+        "content_type": job_review.content_type,
+        "created_time": created,
+        "included_items": len(included),
+        "excluded_ignored_items": len([decision for decision in decisions if not decision.include_in_work_order]),
+        "target_library_root": job_review.library_root,
+        "warnings": [*job_review.warnings, *warnings],
+        "notes": job_review.notes,
+        "items": [str(config.to_barnabas_path(path)) for path in item_paths],
+        "todo": "Run reviewed ffmpeg processing for the job; Disc Steward does not depend on ffmpeg.",
+    }
+    (job_dir / "job_manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    job_review.review_status = processing_status if not config.dry_run else "ready_for_processing"
+    job_review.work_order_folder = str(job_dir)
+    job_review.work_order_created_at = created
+    if warnings:
+        job_review.warnings = list(dict.fromkeys([*job_review.warnings, *warnings]))
+    db.save_job_review(job_review)
+    db.audit(
+        "ffmpeg_processing_created",
+        f"Processed {len(item_paths)} item(s) with ffmpeg",
+        job_id,
+        {"folder": str(job_dir), "dry_run": config.dry_run},
+    )
+    return job_dir
+
+
+# Legacy name kept for compatibility with older commands/tests.
+create_fileflows_work_orders = create_ffmpeg_processing_jobs

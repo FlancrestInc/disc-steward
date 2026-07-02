@@ -2,7 +2,7 @@
 """Safe scaffold for extracting subtitle streams for review/OCR workflows.
 
 This Phase 4 helper is intentionally non-destructive. It does not replace,
-delete, or rewrite media files. Wire FileFlows or a future wrapper to call
+delete, or rewrite media files. Wire ffmpeg or a future wrapper to call
 ffmpeg with explicit stream indexes after a human-reviewed subtitle plan exists.
 """
 

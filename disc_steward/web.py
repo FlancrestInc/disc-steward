@@ -477,7 +477,7 @@ def render_job_review(
           <div class="actions">
             <button formaction="/jobs/{job_id}/save">Save draft review</button>
             <button formaction="/jobs/{job_id}/mark-reviewed">Mark reviewed</button>
-            <button formaction="/jobs/{job_id}/create-work-orders">Create FileFlows work orders</button>
+            <button formaction="/jobs/{job_id}/create-work-orders">Run ffmpeg processing</button>
             <button formaction="/jobs/{job_id}/manual-review">Send job to manual review</button>
             <button formaction="/jobs/{job_id}/reopen">Reopen review</button>
           </div>
@@ -687,7 +687,7 @@ def render_file_card(config: AppConfig, job_id: int, row: dict, decision: FileRe
       {controller_final_path}
       {"<p class='errors'>" + escape('; '.join(conflicts)) + "</p>" if conflicts else ""}
       <div class="file-fields">
-        <label><input type="checkbox" name="{prefix}include" {"checked" if decision.include_in_work_order else ""}> Include in FileFlows</label>
+        <label><input type="checkbox" name="{prefix}include" {"checked" if decision.include_in_work_order else ""}> Include in processing</label>
         <label>Role {select(prefix + "role", ROLE_CHOICES, decision.role, blank=True)}</label>
         <label>Display name <input name="{prefix}final_display_name" value="{escape(decision.final_display_name or '')}"></label>
         <label>Final filename <input name="{prefix}final_filename" value="{escape(decision.final_filename or '')}"></label>
@@ -788,7 +788,7 @@ def render_dashboard(db: Database, config: AppConfig) -> str:
 
 def render_validation_section(job_id: int, summary: dict | None) -> str:
     if summary is None:
-        body = "<p class='muted'>No FileFlows output validation has been recorded.</p>"
+        body = "<p class='muted'>No processing validation has been recorded.</p>"
     else:
         item_rows = "".join(render_validation_item(job_id, item) for item in summary.get("items", []))
         warnings = "".join(f"<p class='errors'>{escape(warning)}</p>" for warning in summary.get("warnings", []))
@@ -802,7 +802,7 @@ def render_validation_section(job_id: int, summary: dict | None) -> str:
         """
     return f"""
     <section class="ops">
-      <h2>FileFlows Output Validation</h2>
+      <h2>Processing Validation</h2>
       {body}
       <form method="post" action="/jobs/{job_id}/validate">
         <button>Run validation for this job</button>

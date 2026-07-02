@@ -69,7 +69,7 @@ def render_job_report(db: Database, job_id: int) -> str:
     <tbody>{file_sections}</tbody>
   </table>
   <h2>Suggested Next Action</h2>
-  <p>Review main feature and extras, add metadata IDs, then approve FileFlows handoff. Cleanup and transfer actions remain gated by validation, configuration, and audit logging.</p>
+  <p>Review main feature and extras, add metadata IDs, then run the ffmpeg processing step. Cleanup and transfer actions remain gated by validation, configuration, and audit logging.</p>
 </body>
 </html>
 """

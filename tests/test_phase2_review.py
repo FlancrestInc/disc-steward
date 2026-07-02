@@ -21,7 +21,7 @@ from disc_steward.review import (
 )
 from disc_steward.work_orders import (
     build_fileflows_item_payload,
-    create_fileflows_work_orders,
+    create_ffmpeg_processing_jobs,
     generate_final_paths,
     sanitize_filename_component,
 )
@@ -190,7 +190,7 @@ def test_work_order_payload_and_files_include_barnabas_and_final_paths(tmp_path)
     assert payload["created_by"] == "disc-steward"
 
 
-def test_create_fileflows_work_orders_writes_manifest_and_item_json(tmp_path):
+def test_create_ffmpeg_processing_jobs_writes_manifest_and_item_json(tmp_path):
     config = _config(tmp_path)
     db = Database(tmp_path / "disc_steward.sqlite3")
     db.initialize()
@@ -205,10 +205,10 @@ def test_create_fileflows_work_orders_writes_manifest_and_item_json(tmp_path):
     decision = _file_decision(source_file_id=source_id, generated_final_path=str(generate_final_paths(config, job_review, [_file_decision(source_file_id=source_id)])[source_id].final_path))
     db.save_file_review(decision)
 
-    folder = create_fileflows_work_orders(db, config, job_id)
+    folder = create_ffmpeg_processing_jobs(db, config, job_id, ffmpeg_runner=lambda command: Path(command[-1]).write_bytes(b"ffmpeg-output" * 300))
 
     manifest = json.loads((folder / "job_manifest.json").read_text())
-    item = json.loads((folder / "items" / "item_001.work_order.json").read_text())
+    item = json.loads((folder / "items" / "item_001.process.json").read_text(encoding="utf-8"))
     assert manifest["job_id"] == job_id
     assert manifest["included_items"] == 1
     assert manifest["target_library_root"] == "Movies"

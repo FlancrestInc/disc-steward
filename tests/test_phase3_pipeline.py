@@ -10,7 +10,7 @@ from disc_steward.jellyfin import refresh_after_import
 from disc_steward.models import AudioStream, FileReviewDecision, JobReviewMetadata, ScannedFile, SubtitleStream, VideoInfo
 from disc_steward.transfer import transfer_job_to_eddy
 from disc_steward.validation import validate_job_outputs
-from disc_steward.work_orders import create_fileflows_work_orders, generate_final_paths
+from disc_steward.work_orders import create_ffmpeg_processing_jobs, generate_final_paths
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -127,7 +127,12 @@ def _reviewed_job(tmp_path: Path, config: AppConfig) -> tuple[Database, int, int
             generated_final_path=str(path),
         )
     )
-    create_fileflows_work_orders(db, config, job_id)
+    previous_dry_run = config.dry_run
+    config.dry_run = True
+    try:
+        create_ffmpeg_processing_jobs(db, config, job_id, ffmpeg_runner=lambda command: Path(command[-1]).write_bytes(b"ffmpeg-output" * 300))
+    finally:
+        config.dry_run = previous_dry_run
     return db, job_id, source_id, path
 
 

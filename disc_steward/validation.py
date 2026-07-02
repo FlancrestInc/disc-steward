@@ -61,7 +61,7 @@ def validate_job_outputs(
 ) -> JobValidationSummary:
     work_orders = db.list_work_order_payloads(job_id)
     if not work_orders:
-        raise ValueError(f"No FileFlows work orders found for job {job_id}")
+        raise ValueError(f"No processing outputs were recorded for job {job_id}")
     runner = ffprobe_runner or (lambda path: run_ffprobe(config.ffprobe_path, path))
     source_rows = {row["id"]: row for row in db.source_file_payloads(job_id)}
     items: list[OutputValidationItem] = []
@@ -97,7 +97,7 @@ def validate_job_outputs(
     for output_dir in {_controller_validation_output_dir(config, payload, job_id) for payload in work_orders}:
         for extra in sorted(output_dir.glob("*.mkv")) if output_dir.exists() else []:
             if str(extra) not in matched_paths:
-                warnings.append(f"unmatched FileFlows output: {extra}")
+                warnings.append(f"unmatched processing output: {extra}")
 
     passed = all(item.status == "passed" or item.manually_accepted for item in items)
     status = "validated" if passed else "validation_failed"

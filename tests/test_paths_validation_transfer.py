@@ -6,7 +6,7 @@ from disc_steward.db import Database
 from disc_steward.models import AudioStream, FileReviewDecision, JobReviewMetadata, ReviewDecision, ScannedFile, SubtitleStream, VideoInfo
 from disc_steward.transfer import detect_transfer_conflict, transfer_job_to_eddy
 from disc_steward.validation import validate_job_outputs, validate_output
-from disc_steward.work_orders import build_fileflows_item_payload, build_final_library_path, create_fileflows_work_orders, generate_final_paths
+from disc_steward.work_orders import build_fileflows_item_payload, build_final_library_path, create_ffmpeg_processing_jobs, generate_final_paths
 
 
 def test_movie_final_path_includes_metadata_id(tmp_path):
@@ -240,7 +240,12 @@ def _reviewed_job(config: AppConfig, tmp_path: Path) -> tuple[Database, int, int
     final_path = str(generate_final_paths(config, review, [decision])[source_id].final_path)
     decision.generated_final_path = final_path
     db.save_file_review(decision)
-    create_fileflows_work_orders(db, config, job_id)
+    previous_dry_run = config.dry_run
+    config.dry_run = True
+    try:
+        create_ffmpeg_processing_jobs(db, config, job_id, ffmpeg_runner=lambda command: Path(command[-1]).write_bytes(b"ffmpeg-output" * 300))
+    finally:
+        config.dry_run = previous_dry_run
     return db, job_id, source_id, final_path
 
 

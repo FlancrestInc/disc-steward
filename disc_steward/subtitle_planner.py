@@ -131,7 +131,7 @@ def validate_subtitle_plan_result(plan: SubtitlePlan | dict, parsed: ScannedFile
     has_ass = bool(codecs & ASS_SUBTITLE_CODECS)
 
     if any(action.get("type") in {"ocr_to_srt", "ass_to_srt_fallback", "generate_missing_srt"} for action in plan.actions) and not has_srt:
-        warnings.append("required SRT is expected but was not detected; confirm sidecar or downstream FileFlows output manually")
+        warnings.append("required SRT is expected but was not detected; confirm sidecar or downstream processing output manually")
     if any(_codec(stream) in IMAGE_SUBTITLE_CODECS and stream.default for stream in parsed_subtitles):
         issues.append("image subtitle is marked default")
     for action in plan.actions:

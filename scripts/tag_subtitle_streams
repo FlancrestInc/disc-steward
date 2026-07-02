@@ -2,7 +2,7 @@
 """Safe scaffold for future subtitle stream tagging.
 
 This helper does not mutate containers in Phase 4. It prints the requested
-intent so FileFlows logs can capture the reviewed plan.
+intent so reviewed processing can record the planned tag update.
 """
 
 from __future__ import annotations

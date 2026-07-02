@@ -8,7 +8,7 @@ from disc_steward.db import Database
 from disc_steward.models import AudioStream, FileReviewDecision, JobReviewMetadata, ScannedFile, SubtitleStream, VideoInfo
 from disc_steward.subtitle_planner import generate_subtitle_plan, validate_subtitle_plan_result
 from disc_steward.validation import validate_job_outputs
-from disc_steward.work_orders import build_fileflows_item_payload, create_fileflows_work_orders, generate_final_paths
+from disc_steward.work_orders import build_fileflows_item_payload, create_ffmpeg_processing_jobs, generate_final_paths
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -138,7 +138,7 @@ def test_work_order_payload_includes_subtitle_plan_json(tmp_path):
     assert any(action["type"] == "ocr_to_srt" for action in payload["subtitle_plan"]["actions"])
 
 
-def test_create_fileflows_work_orders_persists_subtitle_plan(tmp_path):
+def test_create_ffmpeg_processing_jobs_persists_subtitle_plan(tmp_path):
     config = _config(tmp_path)
     db = Database(tmp_path / "disc_steward.sqlite3")
     db.initialize()
@@ -153,9 +153,9 @@ def test_create_fileflows_work_orders_persists_subtitle_plan(tmp_path):
     decision = _decision(source_id, generated_final_path=str(generate_final_paths(config, review, [_decision(source_id)])[source_id].final_path))
     db.save_file_review(decision)
 
-    folder = create_fileflows_work_orders(db, config, job_id)
+    folder = create_ffmpeg_processing_jobs(db, config, job_id, ffmpeg_runner=lambda command: Path(command[-1]).write_bytes(b"ffmpeg-output" * 300))
 
-    item = json.loads((folder / "items" / "item_001.work_order.json").read_text(encoding="utf-8"))
+    item = json.loads((folder / "items" / "item_001.process.json").read_text(encoding="utf-8"))
     assert item["subtitle_plan"]["image_subtitles_default"] is True
     assert db.get_subtitle_plan(source_id)["statuses"] == ["needs_ocr_to_srt", "needs_default_flag_cleanup"]
 
@@ -188,7 +188,12 @@ def test_job_validation_warns_when_subtitle_plan_cannot_confirm_srt(tmp_path):
     db.save_job_review(review)
     decision = _decision(source_id, generated_final_path=str(generate_final_paths(config, review, [_decision(source_id)])[source_id].final_path))
     db.save_file_review(decision)
-    create_fileflows_work_orders(db, config, job_id)
+    previous_dry_run = config.dry_run
+    config.dry_run = True
+    try:
+        create_ffmpeg_processing_jobs(db, config, job_id, ffmpeg_runner=lambda command: Path(command[-1]).write_bytes(b"ffmpeg-output" * 300))
+    finally:
+        config.dry_run = previous_dry_run
     output = config.validation_needed_path / f"job_{job_id}" / Path(decision.generated_final_path).name
     output.parent.mkdir(parents=True)
     output.write_bytes(b"output" * 1000)

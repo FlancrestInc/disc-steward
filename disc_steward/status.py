@@ -27,7 +27,7 @@ def build_status_summary(db, config: AppConfig) -> dict:
     summary = {
         "jobs_discovered": len(jobs),
         "jobs_needing_review": counts["review_needed"] + counts["review_in_progress"] + counts["manual_review"],
-        "jobs_waiting_for_fileflows": counts["reviewed"] + counts["ready_for_fileflows"] + counts["fileflows_work_orders_created"],
+        "jobs_waiting_for_processing": counts["reviewed"] + counts["ready_for_fileflows"] + counts["fileflows_work_orders_created"] + counts["ready_for_processing"],
         "jobs_needing_validation": counts["validation_needed"],
         "jobs_ready_for_transfer": counts["transfer_ready"] + counts["validated"],
         "jobs_imported": counts["imported_to_jellyfin"],
@@ -49,7 +49,7 @@ def format_status_summary(summary: dict) -> str:
     lines = [
         f"jobs discovered: {summary['jobs_discovered']}",
         f"needs review: {summary['jobs_needing_review']}",
-        f"waiting for FileFlows: {summary['jobs_waiting_for_fileflows']}",
+        f"waiting for processing: {summary['jobs_waiting_for_processing']}",
         f"needs validation: {summary['jobs_needing_validation']}",
         f"ready for transfer: {summary['jobs_ready_for_transfer']}",
         f"imported: {summary['jobs_imported']}",

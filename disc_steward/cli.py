@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 
 from .config import load_config
 from .cleanup import execute_cleanup, plan_cleanup
@@ -13,7 +14,7 @@ from .transfer import transfer_job_to_eddy
 from .utils import configure_logging
 from .validation import validate_job_outputs
 from .web import serve_review_ui
-from .work_orders import create_fileflows_work_orders
+from .work_orders import create_ffmpeg_processing_jobs
 
 LOG = logging.getLogger(__name__)
 
@@ -29,9 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", parents=[shared], help="Serve review/report UI")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8765)
-    prepare = sub.add_parser("prepare-fileflows", parents=[shared], help="Create FileFlows work orders for reviewed jobs")
-    prepare.add_argument("--job-id", type=int, required=True)
-    validate = sub.add_parser("validate", parents=[shared], help="Validate FileFlows output")
+    process = sub.add_parser("process", parents=[shared], help="Run ffmpeg processing for reviewed jobs")
+    process.add_argument("--job-id", type=int, required=True)
+    validate = sub.add_parser("validate", parents=[shared], help="Validate processed output")
     validate.add_argument("--job-id", type=int, required=True)
     transfer = sub.add_parser("transfer", parents=[shared], help="Transfer validated output to Eddy")
     transfer.add_argument("--job-id", type=int, required=True)
@@ -42,6 +43,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "prepare-fileflows":
+        argv = ["process", *argv[1:]]
     args = build_parser().parse_args(argv)
     configure_logging(getattr(args, "verbose", False))
     config = load_config(getattr(args, "config", "config.yaml"))
@@ -60,8 +65,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Serving Disc Steward review UI at http://{args.host}:{args.port}")
         serve_review_ui(db, config, args.host, args.port)
         return 0
-    if args.command == "prepare-fileflows":
-        folder = create_fileflows_work_orders(db, config, args.job_id)
+    if args.command in {"process", "prepare-fileflows"}:
+        folder = create_ffmpeg_processing_jobs(db, config, args.job_id)
         print(folder)
         return 0
     if args.command == "validate":
