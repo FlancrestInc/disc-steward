@@ -150,13 +150,15 @@ def test_create_ffmpeg_processing_jobs_persists_subtitle_plan(tmp_path):
     source_id = db.upsert_source_file(job_id, _source(media, subtitles=[SubtitleStream(index=4, codec="hdmv_pgs_subtitle", language="eng", default=True)]))
     review = _job_review(job_id)
     db.save_job_review(review)
-    decision = _decision(source_id, generated_final_path=str(generate_final_paths(config, review, [_decision(source_id)])[source_id].final_path))
+    decision = _decision(source_id, encoding_profile="remux_only", generated_final_path=str(generate_final_paths(config, review, [_decision(source_id, encoding_profile="remux_only")])[source_id].final_path))
     db.save_file_review(decision)
 
     folder = create_ffmpeg_processing_jobs(db, config, job_id, ffmpeg_runner=lambda command: Path(command[-1]).write_bytes(b"ffmpeg-output" * 300))
 
     item = json.loads((folder / "items" / "item_001.process.json").read_text(encoding="utf-8"))
     assert item["subtitle_plan"]["image_subtitles_default"] is True
+    disposition_index = item["ffmpeg_command"].index("-disposition:s:0")
+    assert item["ffmpeg_command"][disposition_index + 1] == "0"
     assert db.get_subtitle_plan(source_id)["statuses"] == ["needs_ocr_to_srt", "needs_default_flag_cleanup"]
 
 

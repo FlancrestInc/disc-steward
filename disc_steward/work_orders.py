@@ -198,10 +198,49 @@ def _subtitle_warning_messages(source: ScannedFile) -> list[str]:
     return warnings
 
 
-def _build_ffmpeg_command(config: AppConfig, source: ScannedFile, decision: FileReviewDecision, output_path: Path) -> list[str]:
+def _subtitle_output_positions(subtitles: list[SubtitleStream]) -> dict[int, int]:
+    return {stream.index: position for position, stream in enumerate(subtitles)}
+
+
+def _subtitle_disposition_args(source: ScannedFile, subtitle_plan: dict | None, subtitles: list[SubtitleStream]) -> list[str]:
+    if not subtitle_plan:
+        return []
+    positions = _subtitle_output_positions(subtitles)
+    args: list[str] = []
+    for action in subtitle_plan.get("actions", []):
+        position = positions.get(action.get("source_stream_index"))
+        if position is None:
+            continue
+        action_type = action.get("type")
+        if action_type == "unset_default":
+            args.extend([f"-disposition:s:{position}", "0"])
+        elif action_type == "mark_default":
+            args.extend([f"-disposition:s:{position}", "default"])
+        elif action_type == "mark_forced":
+            args.extend([f"-disposition:s:{position}", "forced"])
+    return args
+
+
+def _build_ffmpeg_command(
+    config: AppConfig,
+    source: ScannedFile,
+    decision: FileReviewDecision,
+    output_path: Path,
+    subtitle_plan: dict | None = None,
+) -> list[str]:
     profile = (decision.encoding_profile or "").strip() or "universal_h264_aac_srt"
     command = [config.ffmpeg_path, "-hide_banner", "-y", "-nostdin", "-i", str(source.path), "-map_metadata", "0", "-map_chapters", "0"]
-    subtitles = _subtitle_streams_for_mux(source)
+    subtitles = source.subtitle_streams if profile == "remux_only" else _subtitle_streams_for_mux(source)
+    if subtitle_plan is None:
+        subtitle_plan = plan_to_dict(
+            generate_subtitle_plan(
+                source,
+                content_type=decision.content_type or "movie",
+                subtitle_policy=decision.subtitle_policy,
+                preferred_format=config.subtitle_planning.preferred_format,
+                preserve_original_subtitles=config.subtitle_planning.preserve_original_subtitles,
+            )
+        )
     if profile == "remux_only":
         command.extend(["-map", "0", "-c", "copy"])
     else:
@@ -221,6 +260,7 @@ def _build_ffmpeg_command(config: AppConfig, source: ScannedFile, decision: File
                 command.extend(["-c:s", "srt"])
         else:
             command.append("-sn")
+    command.extend(_subtitle_disposition_args(source, subtitle_plan, subtitles))
     command.append(str(output_path))
     return command
 
@@ -287,7 +327,13 @@ def build_ffmpeg_item_payload(
         "created_by": "disc-steward",
     }
     if source is not None:
-        payload["ffmpeg_command"] = _build_ffmpeg_command(config, source, decision, config.to_barnabas_path(config.validation_needed_path / f"job_{job_id}") / final_path.name)
+        payload["ffmpeg_command"] = _build_ffmpeg_command(
+            config,
+            source,
+            decision,
+            config.to_barnabas_path(config.validation_needed_path / f"job_{job_id}") / final_path.name,
+            subtitle_plan,
+        )
     return payload
 
 
