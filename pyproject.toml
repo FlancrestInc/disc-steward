@@ -9,7 +9,8 @@ description = "Safe control-plane service for homelab disc ripping, review, and 
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "PyYAML>=6.0.1"
+  "PyYAML>=6.0.1",
+  "rapidocr-onnxruntime>=1.4.4"
 ]
 
 [project.optional-dependencies]

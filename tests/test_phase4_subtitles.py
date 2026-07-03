@@ -6,6 +6,8 @@ from pathlib import Path
 from disc_steward.config import AppConfig
 from disc_steward.db import Database
 from disc_steward.models import AudioStream, FileReviewDecision, JobReviewMetadata, ScannedFile, SubtitleStream, VideoInfo
+from disc_steward.subtitle_extraction import extract_subtitle_sidecars
+import disc_steward.subtitle_extraction as subtitle_extraction
 from disc_steward.subtitle_planner import generate_subtitle_plan, validate_subtitle_plan_result
 from disc_steward.validation import validate_job_outputs
 from disc_steward.work_orders import build_fileflows_item_payload, create_ffmpeg_processing_jobs, generate_final_paths
@@ -157,9 +159,95 @@ def test_create_ffmpeg_processing_jobs_persists_subtitle_plan(tmp_path):
 
     item = json.loads((folder / "items" / "item_001.process.json").read_text(encoding="utf-8"))
     assert item["subtitle_plan"]["image_subtitles_default"] is True
-    disposition_index = item["ffmpeg_command"].index("-disposition:s:0")
-    assert item["ffmpeg_command"][disposition_index + 1] == "0"
+    assert item["subtitle_plan"]["statuses"] == ["needs_ocr_to_srt", "needs_default_flag_cleanup"]
+    assert item["subtitle_outputs"]
+    assert item["subtitle_outputs"][0]["output_name"].endswith(".srt")
     assert db.get_subtitle_plan(source_id)["statuses"] == ["needs_ocr_to_srt", "needs_default_flag_cleanup"]
+
+
+def test_extract_text_subtitle_sidecar_does_not_require_ocr_runtime(tmp_path, monkeypatch):
+    source = _source(tmp_path / "movie.mkv", subtitles=[SubtitleStream(index=6, codec="subrip", language="eng")])
+    monkeypatch.setattr(subtitle_extraction, "RapidOCR", None)
+
+    def fake_ffmpeg(command: list[str]) -> None:
+        Path(command[-1]).write_text("1\n00:00:00,000 --> 00:00:01,000\nSubtitle\n\n", encoding="utf-8")
+
+    results = extract_subtitle_sidecars("ffmpeg", "ffprobe", source, tmp_path, "Movie.mkv", ffmpeg_runner=fake_ffmpeg)
+
+    assert len(results) == 1
+    assert results[0].kind == "text"
+    assert (tmp_path / "Movie.sub01.eng.subrip.srt").read_text(encoding="utf-8").startswith("1\n")
+
+
+def test_extract_image_subtitle_keeps_blank_ocr_frames_aligned(tmp_path, monkeypatch):
+    source = _source(tmp_path / "movie.mkv", subtitles=[SubtitleStream(index=3, codec="dvd_subtitle", language="eng")])
+    monkeypatch.setattr(
+        subtitle_extraction,
+        "_subtitle_packets",
+        lambda _ffprobe_path, _source_path, _subtitle_ordinal: [
+            {"pts_time": "10.0", "duration_time": "1.0"},
+            {"pts_time": "20.0", "duration_time": "1.0"},
+        ],
+    )
+
+    def fake_render(
+        _ffmpeg_path,
+        _source_path,
+        _subtitle_ordinal,
+        _width,
+        _height,
+        _duration_seconds,
+        _fps,
+        frame_indices,
+        output_dir,
+        **_kwargs,
+    ) -> None:
+        for index, _frame_index in enumerate(frame_indices, start=1):
+            (output_dir / f"frame_{index:05d}.png").write_bytes(b"png")
+
+    monkeypatch.setattr(subtitle_extraction, "_render_subtitle_frame_sequence", fake_render)
+
+    class FakeOcr:
+        calls = 0
+
+        def __call__(self, _image_path):
+            self.calls += 1
+            if self.calls == 1:
+                return [None]
+            return [[([[0, 0], [1, 0], [1, 1], [0, 1]], "Correct cue", 0.9)]]
+
+    results = extract_subtitle_sidecars("ffmpeg", "ffprobe", source, tmp_path, "Movie.mkv", ocr_engine=FakeOcr())
+
+    assert len(results) == 1
+    contents = (tmp_path / "Movie.sub01.eng.dvd_subtitle.srt").read_text(encoding="utf-8")
+    assert "00:00:20,000 --> 00:00:21,000" in contents
+    assert "Correct cue" in contents
+    assert "00:00:10,000 --> 00:00:11,000" not in contents
+
+
+def test_image_subtitle_render_is_bounded_to_synthetic_clip(tmp_path):
+    commands: list[list[str]] = []
+
+    def fake_ffmpeg(command: list[str]) -> None:
+        commands.append(command)
+        (tmp_path / "frame_00001.png").write_bytes(b"png")
+
+    subtitle_extraction._render_subtitle_frame_sequence(
+        "ffmpeg",
+        "movie.mkv",
+        0,
+        720,
+        480,
+        5.0,
+        2,
+        [1],
+        tmp_path,
+        ffmpeg_runner=fake_ffmpeg,
+        source_offset=10.0,
+    )
+
+    filter_index = commands[0].index("-filter_complex") + 1
+    assert "shortest=1" in commands[0][filter_index]
 
 
 def test_subtitle_validation_checks_selected_plan_with_warnings(tmp_path):
@@ -173,7 +261,7 @@ def test_subtitle_validation_checks_selected_plan_with_warnings(tmp_path):
     result = validate_subtitle_plan_result(plan, parsed)
 
     assert result.passed is True
-    assert any("required SRT is expected but was not detected" in warning for warning in result.warnings)
+    assert result.warnings == []
 
 
 def test_job_validation_warns_when_subtitle_plan_cannot_confirm_srt(tmp_path):
@@ -193,14 +281,17 @@ def test_job_validation_warns_when_subtitle_plan_cannot_confirm_srt(tmp_path):
     previous_dry_run = config.dry_run
     config.dry_run = True
     try:
-        create_ffmpeg_processing_jobs(db, config, job_id, ffmpeg_runner=lambda command: Path(command[-1]).write_bytes(b"ffmpeg-output" * 300))
+        folder = create_ffmpeg_processing_jobs(db, config, job_id, ffmpeg_runner=lambda command: Path(command[-1]).write_bytes(b"ffmpeg-output" * 300))
     finally:
         config.dry_run = previous_dry_run
+    item = json.loads((folder / "items" / "item_001.process.json").read_text(encoding="utf-8"))
     output = config.validation_needed_path / f"job_{job_id}" / Path(decision.generated_final_path).name
     output.parent.mkdir(parents=True)
     output.write_bytes(b"output" * 1000)
+    for subtitle in item["subtitle_outputs"]:
+        (output.parent / subtitle["output_name"]).write_text("1\n00:00:00,000 --> 00:00:01,000\nSubtitle\n\n", encoding="utf-8")
 
     summary = validate_job_outputs(db, config, job_id, ffprobe_runner=lambda _path: _ffprobe_output(subtitles=[{"codec_name": "hdmv_pgs_subtitle", "default": 0}]))
 
     assert summary.passed is True
-    assert any("required SRT is expected but was not detected" in warning for warning in summary.items[0].warnings)
+    assert summary.items[0].subtitle_outputs

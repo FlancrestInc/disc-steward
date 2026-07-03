@@ -239,6 +239,7 @@ class OutputValidationItem:
     ffprobe_summary: dict[str, Any] = field(default_factory=dict)
     detected_streams: dict[str, Any] = field(default_factory=dict)
     profile_compliance: dict[str, str] = field(default_factory=dict)
+    subtitle_outputs: list[dict[str, Any]] = field(default_factory=list)
     manually_accepted: bool = False
     manual_acceptance_note: str | None = None
 
@@ -269,6 +270,7 @@ class TransferItemResult:
     verification: str = "size"
     conflict: str | None = None
     error: str | None = None
+    subtitle_paths: list[str] = field(default_factory=list)
 
 
 @dataclass

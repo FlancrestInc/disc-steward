@@ -138,8 +138,10 @@ def _reviewed_job(tmp_path: Path, config: AppConfig) -> tuple[Database, int, int
 
 def _write_output(config: AppConfig, job_id: int, final_path: Path, data: bytes = b"output" * 900) -> Path:
     output = config.validation_needed_path / f"job_{job_id}" / final_path.name
-    output.parent.mkdir(parents=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(data)
+    subtitle = output.with_name(f"{output.stem}.sub01.eng.hdmv_pgs_subtitle.srt")
+    subtitle.write_text("1\n00:00:00,000 --> 00:00:02,000\nSubtitle\n\n", encoding="utf-8")
     return output
 
 
@@ -186,9 +188,10 @@ def test_validate_job_warns_when_filename_differs_but_matches_item_id_sidecar(tm
     config = _config(tmp_path)
     db, job_id, source_id, _final_path = _reviewed_job(tmp_path, config)
     renamed = config.validation_needed_path / f"job_{job_id}" / "fileflows-renamed-output.mkv"
-    renamed.parent.mkdir(parents=True)
+    renamed.parent.mkdir(parents=True, exist_ok=True)
     renamed.write_bytes(b"output" * 900)
     (renamed.with_suffix(".json")).write_text(json.dumps({"item_id": source_id}), encoding="utf-8")
+    renamed.with_name(f"{_final_path.stem}.sub01.eng.hdmv_pgs_subtitle.srt").write_text("1\n00:00:00,000 --> 00:00:02,000\nSubtitle\n\n", encoding="utf-8")
 
     summary = validate_job_outputs(db, config, job_id, ffprobe_runner=lambda path: _output_ffprobe())
 

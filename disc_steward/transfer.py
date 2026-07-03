@@ -141,7 +141,22 @@ def _transfer_with_local_mount(
                 raise FileNotFoundError(f"final parent directory does not exist: {final_path.parent}")
             incoming_path.replace(final_path) if config.overwrite_existing else incoming_path.rename(final_path)
             _verify_paths(source, final_path, config.transfer_verify)
+            subtitle_paths: list[str] = []
+            for subtitle in item.get("subtitle_outputs", []) or []:
+                subtitle_name = subtitle.get("output_name")
+                if not subtitle_name:
+                    continue
+                subtitle_source = source.with_name(subtitle_name)
+                subtitle_final = final_path.parent / subtitle_name
+                subtitle_partial = subtitle_final.with_name(f"{subtitle_final.name}.partial")
+                copy_file(subtitle_source, subtitle_partial)
+                _verify_paths(subtitle_source, subtitle_partial, config.transfer_verify)
+                subtitle_partial.rename(subtitle_final)
+                _verify_paths(subtitle_source, subtitle_final, config.transfer_verify)
+                subtitle_paths.append(str(subtitle_final))
+            result.subtitle_paths = subtitle_paths
             result.status = "placed"
+
         except Exception as exc:
             result.status = "failed"
             result.error = f"verification failed: {exc}" if "verification" in str(exc).lower() else str(exc)
@@ -170,6 +185,17 @@ def _transfer_with_rsync(db, config: AppConfig, job_id: int, items: list[dict]) 
         )
         if not config.dry_run:
             subprocess.run(["rsync", *config.ssh_options, str(source), incoming], check=True)
+        subtitle_paths: list[str] = []
+        for subtitle in item.get("subtitle_outputs", []) or []:
+            subtitle_name = subtitle.get("output_name")
+            if not subtitle_name:
+                continue
+            subtitle_source = source.with_name(subtitle_name)
+            subtitle_incoming = f"{target_root}/job_{job_id}/{subtitle_name}"
+            if not config.dry_run:
+                subprocess.run(["rsync", *config.ssh_options, str(subtitle_source), subtitle_incoming], check=True)
+            subtitle_paths.append(subtitle_incoming)
+        result.subtitle_paths = subtitle_paths
         results.append(result)
     return TransferSummary(job_id=job_id, status="transferred_to_eddy_incoming", items=results, warnings=["rsync final placement is not configured"])
 

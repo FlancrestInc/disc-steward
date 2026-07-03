@@ -1,9 +1,11 @@
 from pathlib import Path
+import json
 
 from disc_steward.cleanup import plan_cleanup
 from disc_steward.config import AppConfig, config_from_dict
 from disc_steward.db import Database
 from disc_steward.models import AudioStream, FileReviewDecision, JobReviewMetadata, ReviewDecision, ScannedFile, SubtitleStream, VideoInfo
+import disc_steward.transfer as transfer
 from disc_steward.transfer import detect_transfer_conflict, transfer_job_to_eddy
 from disc_steward.validation import validate_job_outputs, validate_output
 from disc_steward.work_orders import build_fileflows_item_payload, build_final_library_path, create_ffmpeg_processing_jobs, generate_final_paths
@@ -128,6 +130,7 @@ def test_fileflows_payload_uses_barnabas_paths_and_eddy_final_path(tmp_path):
     assert payload["source_path"] == "/mnt/data2/media-pipeline/01_disc_rips_raw/SPIRITED_AWAY/title_t00.mkv"
     assert payload["barnabas_validation_output_dir"] == "/mnt/data2/media-pipeline/06_validation_needed/job_184"
     assert payload["final_library_path"] == "/mnt/jellyfin-media/Movies/Spirited Away (2001)/Spirited Away (2001).mkv"
+    assert payload["subtitle_outputs"] == []
     assert generated.controller_path == tmp_path / "gospel" / "Eddy" / "jellyfin-media" / "Movies" / "Spirited Away (2001)" / "Spirited Away (2001).mkv"
 
 
@@ -135,7 +138,7 @@ def test_validation_reads_fileflows_outputs_through_controller_mount(tmp_path):
     config = _gospel_config(tmp_path)
     db, job_id, _source_id, final_path = _reviewed_job(config, tmp_path)
     output = config.validation_needed_path / f"job_{job_id}" / Path(final_path).name
-    output.parent.mkdir(parents=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(b"output" * 900)
 
     summary = validate_job_outputs(db, config, job_id, ffprobe_runner=lambda _path: _output_ffprobe())
@@ -151,16 +154,55 @@ def test_local_mount_transfer_places_to_controller_eddy_path_but_records_eddy_pa
     (tmp_path / "gospel" / "Eddy" / "jellyfin-media").mkdir(parents=True)
     db, job_id, _source_id, final_path = _reviewed_job(config, tmp_path)
     output = config.validation_needed_path / f"job_{job_id}" / Path(final_path).name
-    output.parent.mkdir(parents=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(b"validated-output" * 300)
     validate_job_outputs(db, config, job_id, ffprobe_runner=lambda _path: _output_ffprobe())
 
     summary = transfer_job_to_eddy(db, config, job_id)
 
     controller_final = config.to_controller_path(Path(final_path), "eddy")
+    validation_summary = db.latest_validation_summary(job_id)
+    assert validation_summary is not None
     assert summary.status == "imported_to_jellyfin"
     assert summary.items[0].final_path == final_path
     assert controller_final.read_bytes() == output.read_bytes()
+    for subtitle in validation_summary["items"][0]["subtitle_outputs"]:
+        assert (controller_final.parent / subtitle["output_name"]).exists()
+
+
+def test_rsync_transfer_includes_subtitle_sidecars(tmp_path, monkeypatch):
+    config = AppConfig.default_for_root(tmp_path)
+    config.transfer_method = "rsync"
+    config.rsync_target = "eddy:/incoming"
+    config.dry_run = False
+    output = tmp_path / "Movie.mkv"
+    output.write_bytes(b"movie")
+    subtitle = tmp_path / "Movie.eng.srt"
+    subtitle.write_text("1\n00:00:00,000 --> 00:00:01,000\nSubtitle\n\n", encoding="utf-8")
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(transfer.subprocess, "run", lambda command, check: commands.append(command))
+
+    summary = transfer._transfer_with_rsync(
+        None,
+        config,
+        42,
+        [
+            {
+                "source_file_id": 7,
+                "matched_output_path": str(output),
+                "expected_final_path": "/media/Movies/Movie/Movie.mkv",
+                "subtitle_outputs": [{"output_name": subtitle.name}],
+            }
+        ],
+    )
+
+    assert commands == [
+        ["rsync", str(output), "eddy:/incoming/job_42/Movie.mkv"],
+        ["rsync", str(subtitle), "eddy:/incoming/job_42/Movie.eng.srt"],
+    ]
+    assert summary.items[0].subtitle_paths == ["eddy:/incoming/job_42/Movie.eng.srt"]
+
 
 
 def test_cleanup_treats_missing_controller_mount_as_unavailable_not_deleted_media(tmp_path):
@@ -243,10 +285,16 @@ def _reviewed_job(config: AppConfig, tmp_path: Path) -> tuple[Database, int, int
     previous_dry_run = config.dry_run
     config.dry_run = True
     try:
-        create_ffmpeg_processing_jobs(db, config, job_id, ffmpeg_runner=lambda command: Path(command[-1]).write_bytes(b"ffmpeg-output" * 300))
+        work_order_dir = create_ffmpeg_processing_jobs(db, config, job_id, ffmpeg_runner=lambda command: Path(command[-1]).write_bytes(b"ffmpeg-output" * 300))
     finally:
         config.dry_run = previous_dry_run
+    item_payload = json.loads(next((work_order_dir / "items").glob("*.process.json")).read_text(encoding="utf-8"))
+    output_dir = config.validation_needed_path / f"job_{job_id}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for subtitle in item_payload.get("subtitle_outputs", []):
+        (output_dir / subtitle["output_name"]).write_text("1\n00:00:00,000 --> 00:00:01,000\nSubtitle\n\n", encoding="utf-8")
     return db, job_id, source_id, final_path
+
 
 
 def _source(media_path: Path, duration: float = 120.0, size: int = 4000) -> ScannedFile:

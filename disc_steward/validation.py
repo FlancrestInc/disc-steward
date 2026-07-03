@@ -76,6 +76,7 @@ def validate_job_outputs(
             expected_final_path=payload.get("final_library_path") or "",
             profile=payload.get("profile") or "",
             subtitle_policy=payload.get("subtitle_policy") or "",
+            subtitle_outputs=payload.get("subtitle_outputs") or [],
         )
         source = _source_from_row(source_rows[source_id])
         output_dir = _controller_validation_output_dir(config, payload, job_id)
@@ -90,7 +91,7 @@ def validate_job_outputs(
         if str(output_path) in matched_paths:
             item.errors.append("output conflicts with another item in this job")
         matched_paths.add(str(output_path))
-        _validate_matched_output(config, item, source, output_path, runner, payload.get("subtitle_plan"))
+        _validate_matched_output(config, item, source, output_path, runner, payload.get("subtitle_outputs") or [])
         item.status = "passed" if not item.errors else "failed"
         items.append(item)
 
@@ -156,13 +157,35 @@ def _match_output(output_dir: Path, expected_name: str, source_file_id: int, pay
     return None, warnings
 
 
+def _validate_subtitle_sidecars(item: OutputValidationItem, output_dir: Path, subtitle_outputs: list[dict]) -> None:
+    for subtitle in subtitle_outputs:
+        output_name = subtitle.get("output_name")
+        if not output_name:
+            item.errors.append("subtitle sidecar output name is missing")
+            continue
+        output_path = output_dir / output_name
+        if not output_path.exists():
+            item.errors.append(f"missing subtitle sidecar: {output_name}")
+            continue
+        if output_path.stat().st_size <= 0:
+            item.errors.append(f"subtitle sidecar is empty: {output_name}")
+            continue
+        try:
+            contents = output_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            item.errors.append(f"subtitle sidecar is not valid UTF-8 text: {output_name}")
+            continue
+        if not contents.strip():
+            item.errors.append(f"subtitle sidecar is empty text: {output_name}")
+
+
 def _validate_matched_output(
     config: AppConfig,
     item: OutputValidationItem,
     source: ScannedFile,
     output_path: Path,
     ffprobe_runner: Callable[[Path], str],
-    subtitle_plan: dict | None = None,
+    subtitle_outputs: list[dict] | None = None,
 ) -> None:
     if not output_path.is_file():
         item.errors.append(f"output path is not a file: {output_path}")
@@ -188,10 +211,8 @@ def _validate_matched_output(
         "subtitles": [stream.__dict__ for stream in parsed.subtitle_streams],
     }
     _validate_duration(config, source, parsed, item)
-    if subtitle_plan:
-        subtitle_result = validate_subtitle_plan_result(subtitle_plan, parsed)
-        item.warnings.extend(subtitle_result.warnings)
-        item.errors.extend(subtitle_result.issues)
+    if subtitle_outputs:
+        _validate_subtitle_sidecars(item, output_path.parent, subtitle_outputs)
     if not item.expected_final_path:
         item.errors.append("generated final library path is missing")
     role_allows_no_video = item.profile in VIDEO_OPTIONAL_ROLES
@@ -221,11 +242,13 @@ def _validate_profile(config: AppConfig, source: ScannedFile, parsed: ScannedFil
         _expect_bit_depth(parsed, item, {8})
         _expect_aac(config, parsed, item)
         _expect_no_default_image_subtitles(config, parsed, item)
-        _expect_text_subtitles_for_policy(parsed, item)
+        item.profile_compliance["subtitles"] = "external_srt"
         return
     if profile == "remux_only":
         item.profile_compliance["video_codec"] = "not_enforced"
         _expect_aac(config, parsed, item)
+        _expect_no_default_image_subtitles(config, parsed, item)
+        item.profile_compliance["subtitles"] = "external_srt"
         return
     if profile == "subtitle_fix_only":
         if source.video.codec and parsed.video.codec != source.video.codec:
@@ -233,14 +256,17 @@ def _validate_profile(config: AppConfig, source: ScannedFile, parsed: ScannedFil
             item.profile_compliance["video_codec"] = "fail"
         else:
             item.profile_compliance["video_codec"] = "pass"
-        _expect_text_subtitles_for_policy(parsed, item)
         _expect_no_default_image_subtitles(config, parsed, item)
+        item.profile_compliance["subtitles"] = "external_srt"
         return
     if profile == "h265_archive_friendly":
         _expect_video(parsed, item, {"hevc", "h265"}, "video_codec")
         _expect_aac(config, parsed, item)
         _expect_no_default_image_subtitles(config, parsed, item)
+        item.profile_compliance["subtitles"] = "external_srt"
         return
+
+
     item.warnings.append(f"profile compliance is not defined for {profile}")
 
 

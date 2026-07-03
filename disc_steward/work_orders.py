@@ -11,6 +11,7 @@ from typing import Callable
 from .config import AppConfig
 from .models import AudioStream, FileReviewDecision, GeneratedPath, JobReviewMetadata, ReviewDecision, ScannedFile, SubtitleStream, VideoInfo
 from .review import validate_review_ready
+from .subtitle_extraction import IMAGE_SUBTITLE_CODECS, SubtitleSidecar, build_subtitle_sidecar_name, extract_subtitle_sidecars
 from .subtitle_planner import generate_subtitle_plan, plan_to_dict
 
 INVALID_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -184,83 +185,47 @@ def _metadata_ids(job: JobReviewMetadata, decision: FileReviewDecision) -> dict[
     return {key: value for key, value in pairs.items() if value}
 
 
-def _subtitle_streams_for_mux(source: ScannedFile) -> list[SubtitleStream]:
-    return [stream for stream in source.subtitle_streams if (stream.codec or "").lower() in MUXABLE_SUBTITLE_CODECS]
-
-
 def _subtitle_warning_messages(source: ScannedFile) -> list[str]:
     warnings: list[str] = []
-    image_streams = [stream for stream in source.subtitle_streams if (stream.codec or "").lower() not in MUXABLE_SUBTITLE_CODECS]
+    image_streams = [stream for stream in source.subtitle_streams if (stream.codec or "").lower() in IMAGE_SUBTITLE_CODECS]
     if image_streams:
-        warnings.append("image subtitle streams were detected and are not converted by the ffmpeg fallback path")
+        warnings.append("image subtitle streams will be OCR'd into external SRT sidecars")
     if any((stream.codec or "").lower() in ASS_SUBTITLE_CODECS for stream in source.subtitle_streams):
-        warnings.append("ASS/SSA subtitles are preserved by the ffmpeg fallback path and converted to SRT when mapped")
+        warnings.append("ASS/SSA subtitles will be converted to external SRT sidecars")
     return warnings
 
 
-def _subtitle_output_positions(subtitles: list[SubtitleStream]) -> dict[int, int]:
-    return {stream.index: position for position, stream in enumerate(subtitles)}
+def _subtitle_outputs_for_source(source: ScannedFile, video_name: str) -> list[dict]:
+    outputs: list[dict] = []
+    for ordinal, stream in enumerate(source.subtitle_streams):
+        codec = (stream.codec or "").lower()
+        outputs.append(
+            {
+                "source_stream_index": stream.index,
+                "source_stream_ordinal": ordinal,
+                "codec": stream.codec,
+                "language": stream.language,
+                "kind": "ocr" if codec in IMAGE_SUBTITLE_CODECS else "text",
+                "output_name": build_subtitle_sidecar_name(video_name, stream, ordinal),
+                "generated_unverified": codec in IMAGE_SUBTITLE_CODECS,
+            }
+        )
+    return outputs
 
 
-def _subtitle_disposition_args(source: ScannedFile, subtitle_plan: dict | None, subtitles: list[SubtitleStream]) -> list[str]:
-    if not subtitle_plan:
-        return []
-    positions = _subtitle_output_positions(subtitles)
-    args: list[str] = []
-    for action in subtitle_plan.get("actions", []):
-        position = positions.get(action.get("source_stream_index"))
-        if position is None:
-            continue
-        action_type = action.get("type")
-        if action_type == "unset_default":
-            args.extend([f"-disposition:s:{position}", "0"])
-        elif action_type == "mark_default":
-            args.extend([f"-disposition:s:{position}", "default"])
-        elif action_type == "mark_forced":
-            args.extend([f"-disposition:s:{position}", "forced"])
-    return args
-
-
-def _build_ffmpeg_command(
-    config: AppConfig,
-    source: ScannedFile,
-    decision: FileReviewDecision,
-    output_path: Path,
-    subtitle_plan: dict | None = None,
-) -> list[str]:
+def _build_ffmpeg_command(config: AppConfig, source: ScannedFile, decision: FileReviewDecision, output_path: Path, subtitle_plan: dict | None = None) -> list[str]:
     profile = (decision.encoding_profile or "").strip() or "universal_h264_aac_srt"
     command = [config.ffmpeg_path, "-hide_banner", "-y", "-nostdin", "-i", str(source.path), "-map_metadata", "0", "-map_chapters", "0"]
-    subtitles = source.subtitle_streams if profile == "remux_only" else _subtitle_streams_for_mux(source)
-    if subtitle_plan is None:
-        subtitle_plan = plan_to_dict(
-            generate_subtitle_plan(
-                source,
-                content_type=decision.content_type or "movie",
-                subtitle_policy=decision.subtitle_policy,
-                preferred_format=config.subtitle_planning.preferred_format,
-                preserve_original_subtitles=config.subtitle_planning.preserve_original_subtitles,
-            )
-        )
+    command.extend(["-map", "0:v:0", "-map", "0:a?"])
     if profile == "remux_only":
-        command.extend(["-map", "0", "-c", "copy"])
+        command.extend(["-c", "copy"])
+    elif profile == "subtitle_fix_only":
+        command.extend(["-c:v", "copy", "-c:a", "copy"])
+    elif profile == "h265_archive_friendly":
+        command.extend(["-c:v", "libx265", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p10le", "-c:a", "aac", "-b:a", "192k"])
     else:
-        command.extend(["-map", "0:v:0", "-map", "0:a?"])
-        if profile == "subtitle_fix_only":
-            command.extend(["-c:v", "copy", "-c:a", "copy"])
-        elif profile == "h265_archive_friendly":
-            command.extend(["-c:v", "libx265", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p10le", "-c:a", "aac", "-b:a", "192k"])
-        else:
-            command.extend(["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k"])
-        if subtitles:
-            for subtitle in subtitles:
-                command.extend(["-map", f"0:{subtitle.index}"])
-            if profile == "subtitle_fix_only":
-                command.extend(["-c:s", "copy"])
-            else:
-                command.extend(["-c:s", "srt"])
-        else:
-            command.append("-sn")
-    command.extend(_subtitle_disposition_args(source, subtitle_plan, subtitles))
+        command.extend(["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k"])
+    command.append("-sn")
     command.append(str(output_path))
     return command
 
@@ -302,6 +267,7 @@ def build_ffmpeg_item_payload(
     warnings = list(getattr(decision, "warnings", []))
     if source is not None:
         warnings.extend(_subtitle_warning_messages(source))
+    subtitle_outputs = _subtitle_outputs_for_source(source, final_path.name) if source is not None else []
     payload = {
         "job_id": job_id,
         "item_id": item_id,
@@ -317,6 +283,7 @@ def build_ffmpeg_item_payload(
         "profile": decision.encoding_profile,
         "subtitle_policy": decision.subtitle_policy,
         "subtitle_plan": subtitle_plan,
+        "subtitle_outputs": subtitle_outputs,
         "output_name": final_path.name,
         "barnabas_validation_output_dir": str(config.to_barnabas_path(config.validation_needed_path / f"job_{job_id}")),
         "final_library_path": str(final_path),
@@ -426,6 +393,30 @@ def create_ffmpeg_processing_jobs(
             _run_ffmpeg(payload["ffmpeg_command"], run_ffmpeg)
             if not output_path.exists():
                 raise RuntimeError(f"ffmpeg did not create expected output: {output_path}")
+            subtitle_results = extract_subtitle_sidecars(
+                config.ffmpeg_path,
+                config.ffprobe_path,
+                source,
+                output_path.parent,
+                payload["output_name"],
+                ffmpeg_runner=run_ffmpeg,
+            )
+            payload["subtitle_outputs"] = [
+                {
+                    "source_stream_index": result.source_stream_index,
+                    "source_stream_ordinal": result.source_stream_ordinal,
+                    "codec": result.codec,
+                    "language": result.language,
+                    "kind": result.kind,
+                    "output_name": result.output_name,
+                    "generated_unverified": result.kind == "ocr",
+                    "warnings": result.warnings,
+                }
+                for result in subtitle_results
+            ]
+            item_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            db.save_work_order_record(job_id, decision.source_file_id, str(item_path), payload, status="processed")
+
     manifest = {
         "job_id": job_id,
         "disc_folder": job.disc_title,
