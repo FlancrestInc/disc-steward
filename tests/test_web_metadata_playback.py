@@ -41,6 +41,29 @@ def test_page_activates_win31_theme_and_maps_legacy_tokens_to_semantic_tokens():
     assert "--font-body: var(--ds-font-ui);" in html
 
 
+def test_review_markup_adopts_win31_control_primitives(tmp_path):
+    config = _config(tmp_path)
+    db, job_id, _source_id, _media = _job_with_source(tmp_path, config)
+
+    html = web.render_job_review(db, config, job_id)
+
+    assert 'class="ds-field">Title <input class="ds-control"' in html
+    assert '<select class="ds-control" name="content_type">' in html
+    assert 'class="ds-button ds-button--primary primary-action"' in html
+    assert 'class="ds-button ds-button--danger danger-action"' in html
+    assert '<table class="ds-table"' in web.render_phase4_sections(db, config, job_id)
+
+
+def test_inline_styles_do_not_override_win31_primitives():
+    html = web.page("Test", "<p>hello</p>")
+
+    assert 'button:not(.ds-button)' in html
+    assert 'input:not(.ds-control)' in html
+    assert 'table:not(.ds-table)' in html
+    assert '.primary-action:not(.ds-button)' in html
+    assert '.danger-action:not(.ds-button)' in html
+
+
 def test_static_design_system_stylesheet_is_served_and_unknown_asset_is_not_found(tmp_path):
     config = _config(tmp_path)
     db = Database(tmp_path / "disc_steward.sqlite3")

@@ -953,22 +953,22 @@ def _render_job_review_summary_strip(
 {split_options_html}
             </select>
           </label>
-          <button form="job-review-form" formaction="/jobs/{job.id}/split-source-file" formmethod="post">Create split job</button>
+          <button form="job-review-form" class="ds-button" formaction="/jobs/{job.id}/split-source-file" formmethod="post">Create split job</button>
         </div>
         """
     summary_actions_html = f"""
       <div class="inline-form job-summary-actions">
-        <button form="job-review-form" formaction="/jobs/{job.id}/open-job-folder" formmethod="post">Open job folder</button>
-        <button form="job-review-form" formaction="/jobs/{job.id}/rescan-job" formmethod="post">Rescan job folder</button>
-        <button form="job-review-form" formaction="/jobs/{job.id}/generate-previews" formmethod="post">Queue previews</button>
-        <button form="job-review-form" formaction="/jobs/{job.id}/resume-flow" formmethod="post">Resume automated flow</button>
-        <button form="job-review-form" formaction="/jobs/{job.id}/save" formmethod="post">Save draft review</button>
-        <button form="job-review-form" class="primary-action" formaction="/jobs/{job.id}/mark-reviewed" formmethod="post">Save and run pipeline</button>
-        <button form="job-review-form" formaction="/jobs/{job.id}/manual-review" formmethod="post">Send job to manual review</button>
-        <button form="job-review-form" formaction="/jobs/{job.id}/reopen" formmethod="post">Reopen review</button>
+        <button form="job-review-form" class="ds-button" formaction="/jobs/{job.id}/open-job-folder" formmethod="post">Open job folder</button>
+        <button form="job-review-form" class="ds-button" formaction="/jobs/{job.id}/rescan-job" formmethod="post">Rescan job folder</button>
+        <button form="job-review-form" class="ds-button" formaction="/jobs/{job.id}/generate-previews" formmethod="post">Queue previews</button>
+        <button form="job-review-form" class="ds-button" formaction="/jobs/{job.id}/resume-flow" formmethod="post">Resume automated flow</button>
+        <button form="job-review-form" class="ds-button" formaction="/jobs/{job.id}/save" formmethod="post">Save draft review</button>
+        <button form="job-review-form" class="ds-button ds-button--primary primary-action" formaction="/jobs/{job.id}/mark-reviewed" formmethod="post">Save and run pipeline</button>
+        <button form="job-review-form" class="ds-button" formaction="/jobs/{job.id}/manual-review" formmethod="post">Send job to manual review</button>
+        <button form="job-review-form" class="ds-button" formaction="/jobs/{job.id}/reopen" formmethod="post">Reopen review</button>
         <button
           form="job-review-form"
-          class="danger-action"
+          class="ds-button ds-button--danger danger-action"
           formaction="/jobs/{job.id}/delete-job"
           formmethod="post"
           onclick="return confirm('Delete this job from the queue? This removes all saved review data for the job.')"
@@ -1150,10 +1150,10 @@ def render_job_fields(config: AppConfig, review: JobReviewMetadata) -> str:
       <fieldset class="primary-metadata">
         <legend>Primary metadata</legend>
         <p class="wide muted">Set the title, year, content type, and library root first. Everything else lives in the advanced section below.</p>
-        <label>Title <input name="title" value="{escape(review.title)}"></label>
-        <label>Year <input name="year" value="{escape(str(review.year or ''))}" inputmode="numeric"></label>
-        <label>Content type {select("content_type", CONTENT_TYPES, review.content_type)}</label>
-        <label>Library root {select("library_root", list(config.eddy_library_roots.keys()) or LIBRARY_ROOTS, review.library_root)}</label>
+        <label class="ds-field">Title <input class="ds-control" name="title" value="{escape(review.title)}"></label>
+        <label class="ds-field">Year <input class="ds-control" name="year" value="{escape(str(review.year or ''))}" inputmode="numeric"></label>
+        <label class="ds-field">Content type {select("content_type", CONTENT_TYPES, review.content_type)}</label>
+        <label class="ds-field">Library root {select("library_root", list(config.eddy_library_roots.keys()) or LIBRARY_ROOTS, review.library_root)}</label>
       </fieldset>
       <details class="advanced-panel">
         <summary>Advanced metadata</summary>
@@ -1213,7 +1213,7 @@ def render_metadata_lookup_strip(db: Database, config: AppConfig, job_id: int, t
         <strong>Metadata lookup</strong>
         <span class="muted">{'enabled' if metadata_status['enabled'] else 'disabled'} · {' · '.join(provider_bits)}</span>
       </summary>
-      <button formaction="/jobs/{job_id}/lookup-metadata" {disabled}>Lookup All</button>
+      <button class="ds-button" formaction="/jobs/{job_id}/lookup-metadata" {disabled}>Lookup All</button>
       <p class="wide muted">Choose a match below to apply it to this review. Provider links open the source page so you can verify ambiguous titles before applying.</p>
       {last_lookup_html}
       <div class="wide candidate-grid">{candidates_html}</div>
@@ -1272,7 +1272,7 @@ def _render_metadata_candidate_card(job_id: int, candidate: dict, file_names: di
           <h3>{candidate_label}</h3>
           <p class="muted">Applies to: {target_text}</p>
         </div>
-        <button formaction="/jobs/{job_id}/apply-metadata-candidate-{candidate_id}">Use this match</button>
+        <button class="ds-button" formaction="/jobs/{job_id}/apply-metadata-candidate-{candidate_id}">Use this match</button>
       </div>
       {artwork_html}
       <p class="muted">{provider_link}</p>
@@ -1348,7 +1348,7 @@ def render_file_card(config: AppConfig, job_id: int, row: dict, decision: FileRe
           <p class="muted">{quick_summary}</p>
         </div>
         <div class="file-card-header-actions">
-          <button formaction="/jobs/{job_id}/lookup-file-metadata-{source_id}">Lookup file metadata</button>
+          <button class="ds-button" formaction="/jobs/{job_id}/lookup-file-metadata-{source_id}">Lookup file metadata</button>
           {render_media_review_action_buttons(config, job_id, row)}
         </div>
       </div>
@@ -1414,21 +1414,21 @@ def render_file_card(config: AppConfig, job_id: int, row: dict, decision: FileRe
 
 def render_media_review_action_buttons(config: AppConfig, job_id: int, row: dict) -> str:
     source_id = int(row["id"])
-    preview_button = f'<button formaction="/jobs/{job_id}/generate-preview-{source_id}" formnovalidate>Regenerate preview</button>' if config.preview.enabled else ""
+    preview_button = f'<button class="ds-button" formaction="/jobs/{job_id}/generate-preview-{source_id}" formnovalidate>Regenerate preview</button>' if config.preview.enabled else ""
     return f"""
       <div class="media-actions">
         {preview_button}
         <button
           type="button"
-          class="system-open-action"
+          class="ds-button system-open-action"
           data-system-open-action="/jobs/{job_id}/open-source-file-{source_id}"
         >Open file in system handler</button>
         <button
           type="button"
-          class="system-open-action"
+          class="ds-button system-open-action"
           data-system-open-action="/jobs/{job_id}/open-source-file-folder-{source_id}"
         >Open containing folder</button>
-        <button formaction="/jobs/{job_id}/split-source-file-{source_id}" formnovalidate>Split into new movie job</button>
+        <button class="ds-button" formaction="/jobs/{job_id}/split-source-file-{source_id}" formnovalidate>Split into new movie job</button>
       </div>
     """
 
@@ -1635,7 +1635,7 @@ def _render_automation_queue_table(db: Database, job_id: int) -> str:
     <details class="automation-queue-panel">
       <summary>Automation queue <span class="muted">({len(automation_jobs)} active)</span></summary>
       <section class="ops">
-        <table>
+        <table class="ds-table" data-density="compact">
           <thead><tr><th>Job</th><th>State</th><th>Attempts</th><th>Queued</th><th>Started</th><th>Finished</th><th>Note</th></tr></thead>
           <tbody>{''.join(rows_html)}</tbody>
         </table>
@@ -1658,7 +1658,7 @@ def render_phase3_sections(db: Database, config: AppConfig, job_id: int) -> str:
         <p>Automated flow status: <strong>{escape(pipeline_status)}</strong></p>
         <p class="muted">If something fails, fix the issue and press resume to continue from the last successful step.</p>
         <form method="post" action="/jobs/{job_id}/resume-flow" class="inline-form">
-          <button>Resume automated flow</button>
+          <button class="ds-button">Resume automated flow</button>
         </form>
       </section>
       {automation_queue_html}
@@ -1685,22 +1685,22 @@ def render_phase4_sections(db: Database, config: AppConfig, job_id: int) -> str:
       <section class="ops">
         <p>Metadata providers: <strong>{'enabled' if config.metadata.enabled else 'disabled'}</strong> · LLM/Hermes: <strong>{'enabled' if config.llm.enabled else 'disabled'}</strong> · Cleanup: <strong>{'enabled' if config.cleanup.enabled else 'disabled'}</strong> ({'dry-run' if config.cleanup.dry_run else 'live'})</p>
         <form method="post" action="/jobs/{job_id}/llm-suggestions" class="inline-form">
-          <button {'disabled' if not config.llm.enabled else ''}>Request LLM suggestions</button>
+          <button class="ds-button" {'disabled' if not config.llm.enabled else ''}>Request LLM suggestions</button>
         </form>
-        <form method="post" action="/jobs/{job_id}/generate-subtitle-plans" class="inline-form"><button>Generate subtitle plan</button></form>
-        <table>
+        <form method="post" action="/jobs/{job_id}/generate-subtitle-plans" class="inline-form"><button class="ds-button">Generate subtitle plan</button></form>
+        <table class="ds-table" data-density="compact">
           <thead><tr><th>Suggestion</th><th>Status</th><th>Payload</th></tr></thead>
           <tbody>{suggestion_rows or '<tr><td colspan="3">No LLM suggestions stored.</td></tr>'}</tbody>
         </table>
         <h3>Cleanup</h3>
         <p>Cleanup hold: <strong>{'on' if cleanup_hold else 'off'}</strong></p>
-        <form method="post" action="/jobs/{job_id}/cleanup-plan" class="inline-form"><button>Generate cleanup plan</button></form>
+        <form method="post" action="/jobs/{job_id}/cleanup-plan" class="inline-form"><button class="ds-button">Generate cleanup plan</button></form>
         <form method="post" action="/jobs/{job_id}/cleanup-hold" class="inline-form">
           <label>Hold reason <input name="cleanup_hold_reason" value="manual hold"></label>
-          <button>Mark job as cleanup hold</button>
+          <button class="ds-button">Mark job as cleanup hold</button>
         </form>
-        <form method="post" action="/jobs/{job_id}/remove-cleanup-hold" class="inline-form"><button>Remove cleanup hold</button></form>
-        <table>
+        <form method="post" action="/jobs/{job_id}/remove-cleanup-hold" class="inline-form"><button class="ds-button">Remove cleanup hold</button></form>
+        <table class="ds-table" data-density="compact">
           <thead><tr><th>Type</th><th>Eligible</th><th>Path</th><th>Reason</th></tr></thead>
           <tbody>{cleanup_rows or '<tr><td colspan="4">No cleanup plan recorded.</td></tr>'}</tbody>
         </table>
@@ -1802,7 +1802,7 @@ def render_preview_queue_panel(db: Database, config: AppConfig) -> str:
     <details class="dashboard-lane preview-queue-panel">
       <summary>Preview queue <span class="muted">({active_total} active · {counts['queued']} queued · {counts['running']} running · {counts['failed']} failed)</span></summary>
       <section class="ops">
-        <table>
+        <table class="ds-table" data-density="compact">
           <thead><tr><th>Job</th><th>File</th><th>State</th><th>Attempts</th><th>Queued</th><th>Started</th><th>Note</th></tr></thead>
           <tbody>{''.join(row_html)}</tbody>
         </table>
@@ -1928,11 +1928,11 @@ def render_ignored_job_card(row: dict) -> str:
       <div class="inline-form job-summary-actions ignored-job-actions">
         <form method="post" action="/ignored/open-folder" class="inline-form">
           <input type="hidden" name="disc_path" value="{escape(str(disc_path))}">
-          <button type="submit">Open folder</button>
+          <button type="submit" class="ds-button">Open folder</button>
         </form>
         <form method="post" action="/ignored/unignore" class="inline-form">
           <input type="hidden" name="disc_path" value="{escape(str(disc_path))}">
-          <button type="submit" class="primary-action">Unignore job</button>
+          <button type="submit" class="ds-button ds-button--primary primary-action">Unignore job</button>
         </form>
       </div>
     </article>
@@ -1948,7 +1948,7 @@ def render_validation_section(job_id: int, summary: dict | None) -> str:
         body = f"""
         <p>Status: <strong>{escape(summary.get('status', 'unknown'))}</strong></p>
         {warnings}
-        <table>
+        <table class="ds-table" data-density="compact">
           <thead><tr><th>Source</th><th>Status</th><th>Expected</th><th>Matched</th><th>Profile</th><th>Warnings / Errors</th></tr></thead>
           <tbody>{item_rows}</tbody>
         </table>
@@ -1958,7 +1958,7 @@ def render_validation_section(job_id: int, summary: dict | None) -> str:
       <h2>Processing Validation</h2>
       {body}
       <form method="post" action="/jobs/{job_id}/validate">
-        <button>Run validation for this job</button>
+        <button class="ds-button">Run validation for this job</button>
       </form>
     </section>
     """
@@ -1974,7 +1974,7 @@ def render_validation_item(job_id: int, item: dict) -> str:
         <form method="post" action="/jobs/{job_id}/manual-accept-output" class="inline-form">
           <input type="hidden" name="source_file_id" value="{int(item['source_file_id'])}">
           <label>Acceptance note <input name="manual_acceptance_note" required></label>
-          <button>Manually accept</button>
+          <button class="ds-button">Manually accept</button>
         </form>
         """
     return f"""
@@ -2008,7 +2008,7 @@ def render_transfer_section(job_id: int, validation: dict | None, summary: dict 
         )
         body = f"""
         <p>Status: <strong>{escape(summary.get('status', 'unknown'))}</strong></p>
-        <table>
+        <table class="ds-table" data-density="compact">
           <thead><tr><th>Source</th><th>Status</th><th>Eddy Incoming</th><th>Final Eddy Path</th><th>Conflict / Error</th></tr></thead>
           <tbody>{rows}</tbody>
         </table>
@@ -2019,7 +2019,7 @@ def render_transfer_section(job_id: int, validation: dict | None, summary: dict 
       <p>Readiness: <strong>{'ready' if ready else 'not ready'}</strong></p>
       {body}
       <form method="post" action="/jobs/{job_id}/transfer">
-        <button {'disabled' if not ready else ''}>Transfer validated outputs</button>
+        <button class="ds-button" {'disabled' if not ready else ''}>Transfer validated outputs</button>
       </form>
     </section>
     """
@@ -2043,7 +2043,7 @@ def _issues(classification: Classification) -> list[str]:
 
 def select(name: str, options: list[str], selected: str | None, blank: bool = False) -> str:
     values = [""] + options if blank else options
-    html = [f'<select name="{escape(name)}">']
+    html = [f'<select class="ds-control" name="{escape(name)}">']
     for option in values:
         html.append(f'<option value="{escape(option)}" {"selected" if option == (selected or "") else ""}>{escape(option or "-")}</option>')
     html.append("</select>")
@@ -2162,8 +2162,8 @@ def page(title: str, body: str) -> str:
         h2 {{ font-size: 1.35rem; }}
         h3 {{ font-size: 1rem; }}
         main {{ max-width: 1400px; margin: 0 auto; padding: 62px 14px 24px; }}
-        table {{ width: 100%; border-collapse: collapse; background: #efefef; }}
-        th, td {{ border-bottom: 1px solid #8f8f8f; padding: 8px; text-align: left; vertical-align: top; }}
+        table:not(.ds-table) {{ width: 100%; border-collapse: collapse; background: #efefef; }}
+        table:not(.ds-table) th, table:not(.ds-table) td {{ border-bottom: 1px solid #8f8f8f; padding: 8px; text-align: left; vertical-align: top; }}
         fieldset, .file-card, .lookup-strip, .ops, .primary-callout, .dashboard-summary, .dashboard-lane, .job-card, .job-admin {{
           border: 1px solid var(--border-dark);
           background: var(--surface);
@@ -2224,14 +2224,14 @@ def page(title: str, body: str) -> str:
         .candidate-fields {{ display: flex; flex-wrap: wrap; gap: 8px; }}
         .candidate-fields span {{ display: inline-block; padding: 3px 8px; border: 1px solid var(--border-dark); background: #e8e8e8; box-shadow: inset 1px 1px 0 var(--border-light), inset -1px -1px 0 var(--border-mid); font-size: 0.82rem; }}
         label {{ display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }}
-        input, select, textarea, button {{ font: inherit; }}
-        input, select, textarea {{
+        input:not(.ds-control), select:not(.ds-control), textarea:not(.ds-control), button:not(.ds-button) {{ font: inherit; }}
+        input:not(.ds-control), select:not(.ds-control), textarea:not(.ds-control) {{
           border: 1px solid var(--border-dark);
           background: #fff;
           box-shadow: inset 1px 1px 0 var(--border-light), inset -1px -1px 0 var(--border-mid);
           padding: 7px 8px;
         }}
-        button {{
+        button:not(.ds-button) {{
           border: 1px solid var(--border-dark);
           background: var(--surface-soft);
           box-shadow: inset 1px 1px 0 var(--border-light), inset -1px -1px 0 var(--border-mid), var(--shadow-sm);
@@ -2240,7 +2240,7 @@ def page(title: str, body: str) -> str:
           cursor: pointer;
           font-weight: 700;
         }}
-        button:active {{
+        button:not(.ds-button):active {{
           box-shadow: inset -1px -1px 0 var(--border-light), inset 1px 1px 0 var(--border-mid);
           transform: translate(1px, 1px);
         }}
@@ -2280,10 +2280,10 @@ def page(title: str, body: str) -> str:
         .job-summary-topline .eyebrow {{ margin: 0; }}
         .job-summary-number {{ display: inline-block; padding: 3px 8px; border: 1px solid rgba(255,255,255,0.7); background: rgba(255,255,255,0.14); color: #fff; box-shadow: inset 1px 1px 0 rgba(255,255,255,0.28); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em; }}
         .job-summary-actions {{ margin-top: 8px; gap: 6px; align-items: center; }}
-        .job-summary-actions button {{ padding: 4px 8px; font-size: 0.86rem; line-height: 1.05; }}
-        .job-summary-actions .primary-action {{ background: linear-gradient(180deg, #eaf3ff, #c5ddff); }}
-        .job-summary-actions .danger-action {{ background: linear-gradient(180deg, #ffe7e7, #f2b6b6); color: #611111; }}
-        .job-summary-actions .danger-action:hover {{ background: linear-gradient(180deg, #ffd9d9, #efaaaa); }}
+        .job-summary-actions button:not(.ds-button) {{ padding: 4px 8px; font-size: 0.86rem; line-height: 1.05; }}
+        .job-summary-actions .primary-action:not(.ds-button) {{ background: linear-gradient(180deg, #eaf3ff, #c5ddff); }}
+        .job-summary-actions .danger-action:not(.ds-button) {{ background: linear-gradient(180deg, #ffe7e7, #f2b6b6); color: #611111; }}
+        .job-summary-actions .danger-action:not(.ds-button):hover {{ background: linear-gradient(180deg, #ffd9d9, #efaaaa); }}
         .job-summary-create-box {{ display: inline-flex; align-items: center; gap: 6px; padding: 5px 7px; margin-left: auto; border: 1px solid var(--border-dark); background: var(--surface-raised); box-shadow: inset 1px 1px 0 var(--border-light), inset -1px -1px 0 var(--border-mid); flex-wrap: wrap; }}
         .job-summary-create-box .split-picker {{ display: inline-flex; align-items: center; gap: 6px; margin: 0; white-space: nowrap; }}
         .job-summary-create-box select {{ min-width: 140px; }}
@@ -2296,7 +2296,7 @@ def page(title: str, body: str) -> str:
         .pipeline-step-pending {{ background: #e5e5e5; color: #595959; }}
         .job-errors {{ display: block; width: 100%; clear: both; margin: 0 0 12px; }}
         .job-errors p {{ margin: 0.25rem 0; }}
-        textarea {{ min-height: 70px; resize: vertical; }}
+        textarea:not(.ds-control) {{ min-height: 70px; resize: vertical; }}
         .review-stack, .advanced-grid, .file-fields, fieldset.primary-metadata {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }}
         fieldset.primary-metadata {{ position: relative; padding: 18px 16px 16px; }}
         fieldset.primary-metadata > legend {{
