@@ -3,6 +3,8 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 from urllib.error import HTTPError
+from urllib.request import urlopen
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from disc_steward.config import AppConfig, MetadataProviderConfig
@@ -10,6 +12,50 @@ from disc_steward.db import Database
 from disc_steward.metadata import MetadataCandidate, MetadataLookupResult
 from disc_steward.models import AudioStream, FileReviewDecision, ScannedFile, VideoInfo
 from disc_steward import web
+
+
+def test_page_links_versioned_design_system_stylesheet_before_inline_css():
+    html = web.page("Test", "<p>hello</p>")
+
+    stylesheet_index = html.index('rel="stylesheet" href="/static/win31-core.css?v=')
+    inline_css_index = html.index("<style>")
+    assert stylesheet_index < inline_css_index
+
+
+def test_page_activates_win31_theme_and_maps_legacy_tokens_to_semantic_tokens():
+    html = web.page("Test", "<p>hello</p>")
+
+    assert '<body data-ds-theme="win31">' in html
+    assert 'body[data-ds-theme="win31"]' in html
+    assert "--bg: var(--ds-surface-canvas);" in html
+    assert "--surface: var(--ds-surface-window);" in html
+    assert "--title-start: var(--ds-accent-primary);" in html
+    assert "--font-body: var(--ds-font-ui);" in html
+
+
+def test_static_design_system_stylesheet_is_served_and_unknown_asset_is_not_found(tmp_path):
+    config = _config(tmp_path)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    handler = web.make_review_handler(db, config)
+    server = web.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(f"{base_url}/static/win31-core.css", timeout=5) as response:
+            assert response.status == 200
+            assert response.headers["Content-Type"].startswith("text/css")
+            assert response.read().startswith(b"/* Generated from src/index.css")
+        try:
+            urlopen(f"{base_url}/static/not-a-real-asset.css", timeout=5)
+        except HTTPError as error:
+            assert error.code == 404
+        else:  # pragma: no cover
+            raise AssertionError("unknown static asset should 404")
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def _config(tmp_path: Path) -> AppConfig:

@@ -22,6 +22,16 @@ from .validation import validate_job_outputs
 from .work_orders import create_fileflows_work_orders, generate_final_paths
 
 
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+DESIGN_SYSTEM_STYLESHEET = STATIC_DIR / "win31-core.css"
+
+
+def _design_system_stylesheet_href() -> str:
+    if not DESIGN_SYSTEM_STYLESHEET.exists():
+        return "/static/win31-core.css"
+    return f"/static/win31-core.css?v={DESIGN_SYSTEM_STYLESHEET.stat().st_mtime_ns}"
+
+
 ROLE_CHOICES = [
     "main_feature",
     "episode",
@@ -73,6 +83,9 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in {"", "/"}:
             self._send_html(render_job_list(self.database, self.app_config))
+            return
+        if path == "/static/win31-core.css":
+            self._send_design_system_stylesheet()
             return
         if path.startswith("/media/"):
             source_id = _source_id_from_media_path(path)
@@ -126,6 +139,18 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.SEE_OTHER)
         self.send_header("Location", location)
         self.end_headers()
+
+    def _send_design_system_stylesheet(self) -> None:
+        if not DESIGN_SYSTEM_STYLESHEET.exists():
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        data = DESIGN_SYSTEM_STYLESHEET.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/css; charset=utf-8")
+        self.send_header("Cache-Control", "public, max-age=3600")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _send_media(self, source_file_id: int) -> None:
         row = self.database.source_file_payload(source_file_id)
@@ -950,8 +975,29 @@ def page(title: str, body: str) -> str:
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>{escape(title)}</title>
+      <link rel="stylesheet" href="{_design_system_stylesheet_href()}">
       <style>
-        :root {{ color-scheme: light; font-family: system-ui, sans-serif; }}
+        body[data-ds-theme="win31"] {{
+          color-scheme: light;
+          font-family: var(--ds-font-ui);
+          --font-body: var(--ds-font-ui);
+          --font-heading: var(--ds-font-ui);
+          --bg: var(--ds-surface-canvas);
+          --bg-shadow: var(--ds-surface-canvas-shadow);
+          --surface: var(--ds-surface-window);
+          --surface-soft: var(--ds-surface-control-hover);
+          --surface-raised: var(--ds-surface-control);
+          --title-start: var(--ds-accent-primary);
+          --title-end: var(--ds-accent-primary-end);
+          --text: var(--ds-text-primary);
+          --text-muted: var(--ds-text-secondary);
+          --border-dark: var(--ds-border-strong);
+          --border-mid: var(--ds-border-raised-shadow);
+          --border-light: var(--ds-border-raised-highlight);
+          --focus-ring: var(--ds-focus-ring);
+          --shadow-sm: var(--ds-shadow-raised);
+          --shadow-md: 4px 4px 0 rgba(16, 16, 16, 0.21);
+        }}
         body {{ margin: 0; background: #f6f7f8; color: #1f2933; }}
         h1, h2, h3 {{ margin: 0.8rem 0 0.4rem; }}
         main {{ max-width: 1280px; margin: 0 auto; padding: 24px; }}
@@ -975,5 +1021,5 @@ def page(title: str, body: str) -> str:
         code {{ word-break: break-all; }}
       </style>
     </head>
-    <body><main>{body}</main></body>
+    <body data-ds-theme="win31"><main>{body}</main></body>
     </html>"""
