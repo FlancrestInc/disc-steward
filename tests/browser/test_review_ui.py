@@ -73,3 +73,21 @@ def test_review_page_supports_keyboard_controls_and_captures_viewports(page: Pag
     page.emulate_media(reduced_motion="reduce")
     page.reload()
     assert page.locator(".ds-window").evaluate("element => getComputedStyle(element).animationName") == "none"
+
+
+def test_narrow_table_region_preserves_columns_with_horizontal_scroll(page: Page, review_ui: str):
+    page.goto(review_ui)
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.set_content(
+        web.page(
+            "Table viewport",
+            '''<div class="ds-table-wrap" role="region" aria-label="Example table" tabindex="0">
+              <table class="ds-table" style="min-width: 42rem"><thead><tr><th>Wide column</th></tr></thead><tbody><tr><td>Complete data remains available.</td></tr></tbody></table>
+            </div>''',
+        )
+    )
+
+    wrapper = page.locator(".ds-table-wrap")
+    wrapper.focus()
+    assert wrapper.evaluate("element => document.activeElement === element")
+    assert wrapper.evaluate("element => element.scrollWidth > element.clientWidth")

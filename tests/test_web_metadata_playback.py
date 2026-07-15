@@ -102,6 +102,17 @@ def test_file_review_fields_adopt_win31_controls_but_keep_native_checkbox_layout
     assert f'<label><input type="checkbox" name="file_{source_id}_include"' in html
 
 
+def test_operational_tables_use_labelled_keyboard_scroll_regions(tmp_path):
+    config = _config(tmp_path)
+    db, job_id, _source_id, _media = _job_with_source(tmp_path, config)
+
+    html = web.render_phase4_sections(db, config, job_id)
+
+    assert '<div class="ds-table-wrap" role="region" aria-label="Metadata suggestions" tabindex="0">' in html
+    assert '<div class="ds-table-wrap" role="region" aria-label="Cleanup plan" tabindex="0">' in html
+    assert html.count('class="ds-table-wrap"') == 2
+
+
 def test_inline_styles_do_not_override_win31_primitives():
     html = web.page("Test", "<p>hello</p>")
 

@@ -1657,10 +1657,12 @@ def _render_automation_queue_table(db: Database, job_id: int) -> str:
     <details class="automation-queue-panel ds-motion-disclosure">
       <summary>Automation queue <span class="muted">({len(automation_jobs)} active)</span></summary>
       <section class="ops ds-panel">
+        <div class="ds-table-wrap" role="region" aria-label="Automation queue" tabindex="0">
         <table class="ds-table" data-density="compact">
           <thead><tr><th>Job</th><th>State</th><th>Attempts</th><th>Queued</th><th>Started</th><th>Finished</th><th>Note</th></tr></thead>
           <tbody>{''.join(rows_html)}</tbody>
         </table>
+        </div>
       </section>
     </details>
     """
@@ -1710,10 +1712,12 @@ def render_phase4_sections(db: Database, config: AppConfig, job_id: int) -> str:
           <button class="ds-button" {'disabled' if not config.llm.enabled else ''}>Request LLM suggestions</button>
         </form>
         <form method="post" action="/jobs/{job_id}/generate-subtitle-plans" class="inline-form"><button class="ds-button">Generate subtitle plan</button></form>
+        <div class="ds-table-wrap" role="region" aria-label="Metadata suggestions" tabindex="0">
         <table class="ds-table" data-density="compact">
           <thead><tr><th>Suggestion</th><th>Status</th><th>Payload</th></tr></thead>
           <tbody>{suggestion_rows or '<tr><td colspan="3">No LLM suggestions stored.</td></tr>'}</tbody>
         </table>
+        </div>
         <h3>Cleanup</h3>
         <p>Cleanup hold: <strong>{'on' if cleanup_hold else 'off'}</strong></p>
         <form method="post" action="/jobs/{job_id}/cleanup-plan" class="inline-form"><button class="ds-button">Generate cleanup plan</button></form>
@@ -1722,10 +1726,12 @@ def render_phase4_sections(db: Database, config: AppConfig, job_id: int) -> str:
           <button class="ds-button">Mark job as cleanup hold</button>
         </form>
         <form method="post" action="/jobs/{job_id}/remove-cleanup-hold" class="inline-form"><button class="ds-button">Remove cleanup hold</button></form>
+        <div class="ds-table-wrap" role="region" aria-label="Cleanup plan" tabindex="0">
         <table class="ds-table" data-density="compact">
           <thead><tr><th>Type</th><th>Eligible</th><th>Path</th><th>Reason</th></tr></thead>
           <tbody>{cleanup_rows or '<tr><td colspan="4">No cleanup plan recorded.</td></tr>'}</tbody>
         </table>
+        </div>
       </section>
     </details>
     """
@@ -1824,10 +1830,12 @@ def render_preview_queue_panel(db: Database, config: AppConfig) -> str:
     <details class="dashboard-lane preview-queue-panel ds-motion-disclosure">
       <summary>Preview queue <span class="muted">({active_total} active · {counts['queued']} queued · {counts['running']} running · {counts['failed']} failed)</span></summary>
       <section class="ops ds-panel">
+        <div class="ds-table-wrap" role="region" aria-label="Preview queue" tabindex="0">
         <table class="ds-table" data-density="compact">
           <thead><tr><th>Job</th><th>File</th><th>State</th><th>Attempts</th><th>Queued</th><th>Started</th><th>Note</th></tr></thead>
           <tbody>{''.join(row_html)}</tbody>
         </table>
+        </div>
       </section>
     </details>
     """
@@ -1970,10 +1978,12 @@ def render_validation_section(job_id: int, summary: dict | None) -> str:
         body = f"""
         <p>Status: <strong>{escape(summary.get('status', 'unknown'))}</strong></p>
         {warnings}
+        <div class="ds-table-wrap" role="region" aria-label="Processing validation" tabindex="0">
         <table class="ds-table" data-density="compact">
           <thead><tr><th>Source</th><th>Status</th><th>Expected</th><th>Matched</th><th>Profile</th><th>Warnings / Errors</th></tr></thead>
           <tbody>{item_rows}</tbody>
         </table>
+        </div>
         """
     return f"""
     <section class="ops ds-panel">
@@ -2030,10 +2040,12 @@ def render_transfer_section(job_id: int, validation: dict | None, summary: dict 
         )
         body = f"""
         <p>Status: <strong>{escape(summary.get('status', 'unknown'))}</strong></p>
+        <div class="ds-table-wrap" role="region" aria-label="Eddy transfer results" tabindex="0">
         <table class="ds-table" data-density="compact">
           <thead><tr><th>Source</th><th>Status</th><th>Eddy Incoming</th><th>Final Eddy Path</th><th>Conflict / Error</th></tr></thead>
           <tbody>{rows}</tbody>
         </table>
+        </div>
         """
     return f"""
     <section class="ops ds-panel">
