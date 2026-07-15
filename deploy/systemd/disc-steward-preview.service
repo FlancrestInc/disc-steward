@@ -1,0 +1,25 @@
+[Unit]
+Description=Disc Steward preview worker
+Wants=network-online.target
+After=network-online.target
+PartOf=disc-steward.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ryan/projects/disc-steward
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/ryan/.config/disc-steward/disc-steward.env
+ExecStart=/home/ryan/projects/disc-steward/.venv/bin/disc-steward preview-worker --config /home/ryan/projects/disc-steward/config.yaml --poll-interval 1
+Restart=always
+RestartSec=15
+RuntimeDirectory=disc-steward
+RuntimeDirectoryMode=0755
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/ryan/projects/disc-steward /run/disc-steward
+
+[Install]
+WantedBy=disc-steward.target

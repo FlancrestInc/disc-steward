@@ -62,7 +62,7 @@ def render_job_report(db: Database, job_id: int) -> str:
 </head>
 <body>
   <h1>{html.escape(job.disc_title)}</h1>
-  <p>Status: <strong>{html.escape(job.status)}</strong><br>Path: <code>{html.escape(job.disc_path)}</code></p>
+  <p>Status: <strong>{html.escape(job.status)}</strong><br>Path: <code>{html.escape(job.source_disc_path or job.disc_path)}</code>{f'<br>Split from job {job.split_from_job_id}' if job.split_from_job_id is not None else ''}</p>
   <h2>Files</h2>
   <table>
     <thead><tr><th>File</th><th>Duration</th><th>Likely Role</th><th>Risks</th><th>Reasons</th></tr></thead>

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+import os
 
 try:
     import yaml
@@ -34,6 +35,52 @@ class LLMConfig:
 class MetadataProviderConfig:
     enabled: bool = False
     api_key: str = ""
+
+
+@dataclass
+class TitleDiscoveryConfig:
+    enabled: bool = False
+    provider: str = "ollama"
+    endpoint: str = ""
+    model: str = ""
+    min_confidence_to_auto_fill: float = 0.75
+    max_candidates: int = 5
+
+
+@dataclass
+class NotificationConfig:
+    enabled: bool = False
+    provider: str = "ntfy"
+    ntfy_url: str = ""
+    ntfy_topic: str = ""
+    ntfy_token: str = ""
+
+
+@dataclass
+class ProcessingConfig:
+    method: str = "local"
+    ssh_target: str = ""
+    ssh_user: str = ""
+    ssh_options: list[str] = field(default_factory=list)
+    docker_image: str = "disc-steward-ffmpeg:bookworm"
+    docker_state_root: str = "/mnt/data1/docker/disc-steward-ffmpeg"
+
+
+@dataclass
+class PreviewConfig:
+    enabled: bool = True
+    output_path: str = ""
+    worker_enabled: bool = True
+    worker_name: str = "barnabas"
+    max_concurrent_jobs: int = 1
+    ffmpeg_path: str = "ffmpeg"
+    encoder: str = "h264_nvenc"
+    fallback_encoder: str = "libx264"
+    height: int = 480
+    quality: int = 28
+    auto_generate: bool = True
+    clip_duration_seconds: int = 120
+    delete_after_transfer: bool = True
 
 
 @dataclass
@@ -145,6 +192,7 @@ class AppConfig:
         ]
     )
     minimum_title_duration_seconds: int = 30
+    raw_rip_settle_seconds: int = 900
     duration_tolerance_seconds: int = 5
     duration_tolerance_percent: float = 1.0
     validation_require_aac_fallback: bool = True
@@ -162,6 +210,10 @@ class AppConfig:
     jellyfin: JellyfinConfig = field(default_factory=JellyfinConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     metadata: MetadataConfig = field(default_factory=MetadataConfig)
+    title_discovery: TitleDiscoveryConfig = field(default_factory=TitleDiscoveryConfig)
+    processing: ProcessingConfig = field(default_factory=ProcessingConfig)
+    preview: PreviewConfig = field(default_factory=PreviewConfig)
+    notifications: NotificationConfig = field(default_factory=NotificationConfig)
     subtitle_planning: SubtitlePlanningConfig = field(default_factory=SubtitlePlanningConfig)
     japanese_anime: JapaneseAnimeConfig = field(default_factory=JapaneseAnimeConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
@@ -185,6 +237,7 @@ class AppConfig:
             manual_review_path=pipeline / "90_manual_review",
             failed_path=pipeline / "99_failed",
             database_path=pipeline / "disc_steward.sqlite3",
+            preview=PreviewConfig(output_path=str(pipeline / "09_preview_cache")),
             eddy_incoming_path=eddy / ".incoming",
             eddy_library_roots={
                 "Movies": eddy / "Movies",
@@ -261,7 +314,7 @@ def _longest_mappings(mappings: list[PathMapping], machine: str | None = None, n
 
 
 def load_config(path: str | Path) -> AppConfig:
-    text = Path(path).read_text()
+    text = Path(path).read_text(encoding="utf-8")
     data = yaml.safe_load(text) if yaml is not None else _parse_simple_yaml(text)
     data = data or {}
     if not isinstance(data, dict):
@@ -387,6 +440,10 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
     jellyfin = data.get("jellyfin", {})
     llm = data.get("llm", {})
     metadata = data.get("metadata", {})
+    title_discovery = data.get("title_discovery", {})
+    processing = data.get("processing", {})
+    preview = data.get("preview", {})
+    notifications = data.get("notifications", {})
     subtitle_planning = data.get("subtitle_planning", {})
     japanese_anime = data.get("japanese_anime", {})
     jellyfin_logs = data.get("jellyfin_logs", {})
@@ -455,6 +512,7 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
             )
         ),
         minimum_title_duration_seconds=int(data.get("minimum_title_duration_seconds", 30)),
+        raw_rip_settle_seconds=int(data.get("raw_rip_settle_seconds", 900)),
         duration_tolerance_seconds=int(validation.get("duration_tolerance_seconds", data.get("duration_tolerance_seconds", 5))),
         duration_tolerance_percent=float(validation.get("duration_tolerance_percent", 1.0)),
         validation_require_aac_fallback=bool(validation.get("require_aac_fallback", True)),
@@ -494,6 +552,44 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
                 )
                 for name in ["tmdb", "tvdb", "anilist", "anidb", "mal"]
             },
+        ),
+        title_discovery=TitleDiscoveryConfig(
+            enabled=bool(title_discovery.get("enabled", False)),
+            provider=title_discovery.get("provider", "ollama"),
+            endpoint=title_discovery.get("endpoint", ""),
+            model=title_discovery.get("model", ""),
+            min_confidence_to_auto_fill=float(title_discovery.get("min_confidence_to_auto_fill", 0.75)),
+            max_candidates=int(title_discovery.get("max_candidates", 5)),
+        ),
+        processing=ProcessingConfig(
+            method=str(processing.get("method", "local")),
+            ssh_target=str(processing.get("ssh_target", "") or ""),
+            ssh_user=str(processing.get("ssh_user", "") or ""),
+            ssh_options=list(processing.get("ssh_options", [])),
+            docker_image=str(processing.get("docker_image", "disc-steward-ffmpeg:bookworm") or "disc-steward-ffmpeg:bookworm"),
+            docker_state_root=str(processing.get("docker_state_root", "/mnt/data1/docker/disc-steward-ffmpeg") or "/mnt/data1/docker/disc-steward-ffmpeg"),
+        ),
+        preview=PreviewConfig(
+            enabled=bool(preview.get("enabled", True)),
+            output_path=str(preview.get("output_path", preview.get("preview_output_path", root / "09_preview_cache")) or root / "09_preview_cache"),
+            worker_enabled=bool(preview.get("worker_enabled", True)),
+            worker_name=str(preview.get("worker_name", "barnabas") or "barnabas"),
+            max_concurrent_jobs=int(preview.get("max_concurrent_jobs", 1)),
+            ffmpeg_path=str(preview.get("ffmpeg_path", data.get("ffmpeg_path", "ffmpeg")) or "ffmpeg"),
+            encoder=str(preview.get("encoder", "h264_nvenc") or "h264_nvenc"),
+            fallback_encoder=str(preview.get("fallback_encoder", "libx264") or "libx264"),
+            height=int(preview.get("height", 480)),
+            quality=int(preview.get("quality", 28)),
+            auto_generate=bool(preview.get("auto_generate", True)),
+            clip_duration_seconds=int(preview.get("clip_duration_seconds", 120)),
+            delete_after_transfer=bool(preview.get("delete_after_transfer", True)),
+        ),
+        notifications=NotificationConfig(
+            enabled=bool(notifications.get("enabled", False)),
+            provider=notifications.get("provider", "ntfy"),
+            ntfy_url=str(notifications.get("ntfy_url", os.environ.get("DISC_STEWARD_NTFY_URL", "")) or os.environ.get("DISC_STEWARD_NTFY_URL", "")),
+            ntfy_topic=str(notifications.get("ntfy_topic", os.environ.get("DISC_STEWARD_NTFY_TOPIC", "")) or os.environ.get("DISC_STEWARD_NTFY_TOPIC", "")),
+            ntfy_token=str(notifications.get("ntfy_token", os.environ.get("DISC_STEWARD_NTFY_TOKEN", "")) or os.environ.get("DISC_STEWARD_NTFY_TOKEN", "")),
         ),
         subtitle_planning=SubtitlePlanningConfig(
             preferred_format=subtitle_planning.get("preferred_format", data.get("preferred_subtitle_format", "srt")),

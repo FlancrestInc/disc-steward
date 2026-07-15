@@ -1,0 +1,11 @@
+services:
+  ffmpeg:
+    build:
+      context: .
+    image: disc-steward-ffmpeg:bookworm
+    container_name: disc-steward-ffmpeg
+    init: true
+    working_dir: /mnt/data2/media-pipeline
+    volumes:
+      - /mnt/data2/media-pipeline:/mnt/data2/media-pipeline
+      - /mnt/data1/docker/disc-steward-ffmpeg:/mnt/data1/docker/disc-steward-ffmpeg

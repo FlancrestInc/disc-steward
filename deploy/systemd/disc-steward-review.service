@@ -1,0 +1,27 @@
+[Unit]
+Description=Disc Steward review UI
+Wants=network-online.target
+After=network-online.target
+PartOf=disc-steward.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=ryan
+Group=ryan
+WorkingDirectory=/home/ryan/projects/disc-steward
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/ryan/.config/disc-steward/disc-steward.env
+ExecStart=/home/ryan/projects/disc-steward/.venv/bin/disc-steward serve --config /home/ryan/projects/disc-steward/config.yaml --host 0.0.0.0 --port 8765
+Restart=always
+RestartSec=15
+RuntimeDirectory=disc-steward
+RuntimeDirectoryMode=0755
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/ryan/projects/disc-steward /run/disc-steward
+
+[Install]
+WantedBy=disc-steward.target

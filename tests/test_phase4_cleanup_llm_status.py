@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
+from dataclasses import asdict
 
 from disc_steward.cleanup import execute_cleanup, plan_cleanup
 from disc_steward.config import AppConfig, CleanupConfig, LLMConfig, MetadataConfig, config_from_dict
 from disc_steward.db import Database
 from disc_steward.llm import build_disc_job_packet, request_suggestions
 from disc_steward.metadata import metadata_provider_status
-from disc_steward.models import AudioStream, FileReviewDecision, JobReviewMetadata, ScannedFile, SubtitleStream, VideoInfo
+from disc_steward.models import AudioStream, FileReviewDecision, JobReviewMetadata, ScannedFile, SubtitleStream, TitleDiscoveryResult, TitleDiscoverySignal, VideoInfo
 from disc_steward.status import build_status_summary
+from disc_steward.web import render_job_review
 from disc_steward.work_orders import generate_final_paths
 
 
@@ -96,7 +99,149 @@ def test_config_plumbing_keeps_phase4_risky_features_disabled_by_default():
     assert config.metadata.enabled is False
     assert config.llm.enabled is False
     assert config.llm.allow_shell_commands is False
+    assert config.title_discovery.enabled is False
+    assert config.title_discovery.provider == "ollama"
+    assert config.title_discovery.min_confidence_to_auto_fill == 0.75
     assert config.jellyfin_logs.enabled is False
+
+
+def test_review_page_prefills_title_discovery_fields_and_primary_continue_action(tmp_path):
+    config = _config(tmp_path)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    disc = tmp_path / "media-pipeline" / "01_disc_rips_raw" / "Batman 1989"
+    disc.mkdir(parents=True)
+    media = disc / "title_t00.mkv"
+    media.write_bytes(b"raw")
+    job_id = db.upsert_job(disc, "review_needed")
+    db.upsert_source_file(job_id, _source(media))
+    review = JobReviewMetadata(
+        job_id=job_id,
+        title="Batman 1989",
+        content_type="unknown",
+        library_root="Movies",
+        review_status="review_needed",
+        title_discovery_json={
+            "title": "Batman (1989)",
+            "original_title": "Batman",
+            "content_type": "movie",
+            "library_root": "Movies",
+            "confidence": 0.96,
+            "signals": [{"source": "embedded_title", "value": "Batman", "confidence": 0.9}],
+            "warnings": ["normalized from disc art"],
+        },
+    )
+    db.save_job_review(review)
+
+    html = render_job_review(db, config, job_id)
+
+    assert "Batman (1989)" in html
+    assert "normalized from disc art" in html
+    assert 'name="confidence" value="0.96"' in html
+    assert "Confirm and queue ffmpeg" in html
+
+
+def test_title_discovery_config_plumbing_supports_separate_local_inference_settings():
+    config = config_from_dict(
+        {
+            "title_discovery": {
+                "enabled": True,
+                "provider": "ollama",
+                "endpoint": "http://localhost:11434",
+                "model": "llama3.2:3b",
+                "min_confidence_to_auto_fill": 0.9,
+                "max_candidates": 7,
+            }
+        }
+    )
+
+    assert config.title_discovery.enabled is True
+    assert config.title_discovery.endpoint == "http://localhost:11434"
+    assert config.title_discovery.model == "llama3.2:3b"
+    assert config.title_discovery.min_confidence_to_auto_fill == 0.9
+    assert config.title_discovery.max_candidates == 7
+    assert config.llm.enabled is False
+
+
+def _legacy_job_review_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE disc_jobs (
+            id INTEGER PRIMARY KEY,
+            disc_title TEXT NOT NULL,
+            disc_path TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE job_reviews (
+            job_id INTEGER PRIMARY KEY REFERENCES disc_jobs(id) ON DELETE CASCADE,
+            title TEXT NOT NULL DEFAULT '',
+            original_title TEXT,
+            romanized_title TEXT,
+            translated_title TEXT,
+            language_script_hints TEXT,
+            anime_flag INTEGER NOT NULL DEFAULT 0,
+            japanese_media_flag INTEGER NOT NULL DEFAULT 0,
+            confidence REAL,
+            manual_review_notes TEXT,
+            year INTEGER,
+            content_type TEXT NOT NULL DEFAULT 'unknown',
+            library_root TEXT NOT NULL DEFAULT 'Movies',
+            imdb_id TEXT,
+            tmdb_id TEXT,
+            tvdb_id TEXT,
+            anidb_id TEXT,
+            anilist_id TEXT,
+            mal_id TEXT,
+            notes TEXT,
+            review_status TEXT NOT NULL DEFAULT 'review_needed',
+            work_order_folder TEXT,
+            work_order_created_at TEXT,
+            warnings_json TEXT NOT NULL DEFAULT '[]',
+            conflicts_json TEXT NOT NULL DEFAULT '[]',
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+
+
+def test_job_review_title_discovery_json_round_trips_through_sqlite_migration(tmp_path):
+    db_path = tmp_path / "disc_steward.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        _legacy_job_review_schema(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    db = Database(db_path)
+    db.initialize()
+
+    with db.connect() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(job_reviews)").fetchall()}
+    assert "title_discovery_json" in columns
+
+    disc_path = tmp_path / "media-pipeline" / "01_disc_rips_raw" / "DISC"
+    disc_path.mkdir(parents=True)
+    job_id = db.upsert_job(disc_path, "reviewed")
+    discovery = TitleDiscoveryResult(
+        title="Example Movie",
+        original_title="元の題名",
+        confidence=0.93,
+        signals=[
+            TitleDiscoverySignal(source="embedded_title", value="Example Movie", confidence=0.95, notes=["matches filename"]),
+        ],
+        warnings=["low sample count"],
+    )
+    review = JobReviewMetadata(job_id=job_id, title="Example Movie", year=2001, content_type="movie", title_discovery_json=asdict(discovery))
+
+    db.save_job_review(review)
+    loaded = db.get_job_review(job_id)
+
+    assert loaded.title_discovery_json == asdict(discovery)
+    assert loaded.title == "Example Movie"
+    assert loaded.year == 2001
 
 
 def test_metadata_provider_disabled_behavior():

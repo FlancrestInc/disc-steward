@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 from .config import MetadataConfig
 from .models import FileReviewDecision, JobReviewMetadata
+from .review import classification_from_json
 
 
 @dataclass
@@ -27,6 +28,7 @@ class MetadataCandidate:
     extras: list[str] = field(default_factory=list)
     confidence: float = 0.0
     provider_id: str | None = None
+    provider_url: str | None = None
     imdb_id: str | None = None
     tmdb_id: str | None = None
     tvdb_id: str | None = None
@@ -130,6 +132,7 @@ class TmdbProvider(MetadataProvider):
         return MetadataCandidate(
             provider=self.name,
             provider_id=tmdb_id,
+            provider_url=f"https://www.themoviedb.org/movie/{tmdb_id}" if tmdb_id else None,
             title=item.get("title") or item.get("original_title") or "",
             original_title=item.get("original_title"),
             year=year,
@@ -147,6 +150,7 @@ class TmdbProvider(MetadataProvider):
         return MetadataCandidate(
             provider=self.name,
             provider_id=tmdb_id,
+            provider_url=f"https://www.themoviedb.org/tv/{tmdb_id}" if tmdb_id else None,
             title=item.get("name") or item.get("original_name") or "",
             original_title=item.get("original_name"),
             year=year,
@@ -206,6 +210,7 @@ class AniListProvider(MetadataProvider):
         return MetadataCandidate(
             provider=self.name,
             provider_id=anilist_id,
+            provider_url=f"https://anilist.co/anime/{anilist_id}" if anilist_id else None,
             title=title.get("english") or title.get("romaji") or title.get("native") or "",
             original_title=title.get("native"),
             romanized_title=title.get("romaji"),
@@ -265,6 +270,7 @@ class MalProvider(MetadataProvider):
         return MetadataCandidate(
             provider=self.name,
             provider_id=mal_id,
+            provider_url=f"https://myanimelist.net/anime/{mal_id}" if mal_id else None,
             title=titles.get("en") or item.get("title") or titles.get("ja") or "",
             original_title=titles.get("ja"),
             romanized_title=item.get("title"),
@@ -312,17 +318,18 @@ def lookup_job_metadata(db, config, job_id: int, providers: list[Callable] | Non
     db.clear_metadata_candidates(job_id)
     for candidate in candidates:
         db.save_metadata_candidate(job_id, candidate.provider, _candidate_payload(candidate))
-    best = _best_auto_candidate(candidates)
-    applied: dict[str, list[str]] = {}
-    if best is not None:
-        applied = _apply_candidate(db, config, job_id, best)
+    applied_fields: dict[str, list[str]] = {}
+    best_candidate = _best_auto_candidate(candidates)
+    if best_candidate is not None:
+        applied_fields = _apply_candidate(db, config, job_id, best_candidate)
+    applied_count = sum(len(values) for values in applied_fields.values())
     db.audit(
         "metadata_lookup",
-        f"Metadata lookup found {len(candidates)} candidate(s), applied {sum(len(value) for value in applied.values())} field(s)",
+        f"Metadata lookup found {len(candidates)} candidate(s), applied {applied_count} field(s)",
         job_id,
-        {"applied_fields": applied, "provider_results": provider_results, "warnings": warnings},
+        {"applied_fields": applied_fields, "provider_results": provider_results, "warnings": warnings},
     )
-    return MetadataLookupResult(candidates=candidates, applied_fields=applied, provider_results=provider_results, warnings=warnings)
+    return MetadataLookupResult(candidates=candidates, applied_fields=applied_fields, provider_results=provider_results, warnings=warnings)
 
 
 def lookup_file_metadata(
@@ -349,22 +356,23 @@ def lookup_file_metadata(
     db.clear_metadata_candidates(job_id, source_file_id)
     for candidate in candidates:
         db.save_metadata_candidate(job_id, candidate.provider, _candidate_payload(candidate), source_file_id)
-    best = _best_auto_candidate(candidates)
-    applied: dict[str, list[str]] = {}
-    if best is not None:
-        applied = _apply_file_candidate(db, config, job_id, source_file_id, best)
+    applied_fields: dict[str, list[str]] = {}
+    best_candidate = _best_auto_candidate(candidates)
+    if best_candidate is not None:
+        applied_fields = _apply_file_candidate(db, config, job_id, source_file_id, best_candidate)
+    applied_count = sum(len(values) for values in applied_fields.values())
     db.audit(
         "metadata_lookup",
-        f"Metadata lookup for file {source_file_id} found {len(candidates)} candidate(s), applied {sum(len(value) for value in applied.values())} field(s)",
+        f"Metadata lookup for file {source_file_id} found {len(candidates)} candidate(s), applied {applied_count} field(s)",
         job_id,
         {
             "source_file_id": source_file_id,
-            "applied_fields": applied,
+            "applied_fields": applied_fields,
             "provider_results": provider_results,
             "warnings": warnings,
         },
     )
-    return MetadataLookupResult(candidates=candidates, applied_fields=applied, provider_results=provider_results, warnings=warnings)
+    return MetadataLookupResult(candidates=candidates, applied_fields=applied_fields, provider_results=provider_results, warnings=warnings)
 
 
 def _provider_callables(config) -> list[Callable]:
@@ -596,6 +604,34 @@ def _apply_episode_fields(
     for field_name in ["imdb_id", "tmdb_id", "tvdb_id", "anidb_id", "anilist_id", "mal_id"]:
         set_file(field_name, getattr(candidate, field_name))
     return fields
+
+
+def apply_stored_metadata_candidate(db, config, job_id: int, candidate_id: int) -> dict[str, list[str]]:
+    stored = _metadata_candidate_for_job(db, job_id, candidate_id)
+    if stored is None:
+        raise ValueError(f"Unknown metadata candidate: {candidate_id}")
+    candidate = MetadataCandidate(**{key: value for key, value in stored.items() if key not in {"id", "source_file_id", "created_at"}})
+    applied = _apply_candidate(db, config, job_id, candidate)
+    source_file_id = stored.get("source_file_id")
+    if source_file_id is not None:
+        file_applied = _apply_file_candidate(db, config, job_id, int(source_file_id), candidate)
+        if file_applied:
+            applied.update(file_applied)
+    else:
+        for row in db.source_file_payloads(job_id):
+            classification = classification_from_json(row.get("classification_json"))
+            if classification.probable_main_feature:
+                file_applied = _apply_file_candidate(db, config, job_id, row["id"], candidate)
+                if file_applied:
+                    applied.update(file_applied)
+    return applied
+
+
+def _metadata_candidate_for_job(db, job_id: int, candidate_id: int) -> dict | None:
+    for candidate in db.list_metadata_candidates(job_id):
+        if int(candidate.get("id")) == int(candidate_id):
+            return candidate
+    return None
 
 
 def _candidate_payload(candidate: MetadataCandidate) -> dict:

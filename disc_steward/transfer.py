@@ -10,6 +10,7 @@ from typing import Callable
 from .config import AppConfig
 from .jellyfin import refresh_after_import
 from .models import TransferConflict, TransferItemResult, TransferSummary
+from .notifications import send_notification
 
 
 def detect_transfer_conflict(final_path: Path, overwrite: bool = False) -> TransferConflict:
@@ -68,11 +69,22 @@ def transfer_job_to_eddy(
         job_id,
         {"warnings": summary.warnings},
     )
+    if summary.status == "imported_to_jellyfin" and config.preview.delete_after_transfer:
+        deleted = db.delete_preview_files_for_job(job_id)
+        if deleted:
+            db.audit("preview_cleanup", f"Deleted {deleted} preview file(s) after transfer", job_id, {"deleted": deleted})
     if summary.status == "imported_to_jellyfin" and config.jellyfin.refresh_after_import:
         jellyfin_result = refresh_after_import(db, job_id, config.jellyfin)
         if jellyfin_result.get("status") == "warning":
             summary.warnings.append(f"Jellyfin refresh warning: {jellyfin_result.get('error')}")
             db.save_transfer_summary(job_id, _summary_dict(summary))
+    send_notification(
+        config,
+        f"Transfer {'complete' if summary.status == 'imported_to_jellyfin' else summary.status.replace('_', ' ')}: job {job_id}",
+        f"Transfer finished for job {job_id} with status {summary.status}.",
+        priority="default" if summary.status == "imported_to_jellyfin" else "high",
+        tags=["transfer", "success"] if summary.status == "imported_to_jellyfin" else ["transfer", "warning"],
+    )
     return summary
 
 

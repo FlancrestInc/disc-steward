@@ -27,9 +27,19 @@ class Database:
                     id INTEGER PRIMARY KEY,
                     disc_title TEXT NOT NULL,
                     disc_path TEXT NOT NULL UNIQUE,
+                    source_disc_path TEXT,
+                    split_from_job_id INTEGER,
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS ignored_disc_paths (
+                    disc_path TEXT PRIMARY KEY,
+                    job_id INTEGER,
+                    disc_title TEXT,
+                    status TEXT NOT NULL DEFAULT 'deleted',
+                    reason TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS source_files (
                     id INTEGER PRIMARY KEY,
@@ -49,6 +59,12 @@ class Database:
                     embedded_title TEXT,
                     makemkv_title TEXT,
                     raw_ffprobe_json TEXT NOT NULL,
+                    preview_status TEXT NOT NULL DEFAULT 'missing',
+                    preview_path TEXT,
+                    preview_error TEXT,
+                    preview_generated_at TEXT,
+                    preview_source_modified_time REAL,
+                    preview_source_size_bytes INTEGER,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS classifications (
@@ -74,6 +90,7 @@ class Database:
                     japanese_media_flag INTEGER NOT NULL DEFAULT 0,
                     confidence REAL,
                     manual_review_notes TEXT,
+                    title_discovery_json TEXT,
                     year INTEGER,
                     content_type TEXT NOT NULL DEFAULT 'unknown',
                     library_root TEXT NOT NULL DEFAULT 'Movies',
@@ -214,6 +231,31 @@ class Database:
                     payload_json TEXT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS automation_jobs (
+                    job_id INTEGER PRIMARY KEY REFERENCES disc_jobs(id) ON DELETE CASCADE,
+                    force_reprocess INTEGER NOT NULL DEFAULT 0,
+                    state TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_result TEXT,
+                    last_error TEXT,
+                    queued_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS preview_jobs (
+                    source_file_id INTEGER PRIMARY KEY REFERENCES source_files(id) ON DELETE CASCADE,
+                    job_id INTEGER NOT NULL REFERENCES disc_jobs(id) ON DELETE CASCADE,
+                    source_path TEXT NOT NULL,
+                    preview_path TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    queued_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 CREATE TABLE IF NOT EXISTS subtitle_plans (
                     source_file_id INTEGER PRIMARY KEY REFERENCES source_files(id) ON DELETE CASCADE,
                     plan_json TEXT NOT NULL,
@@ -307,6 +349,19 @@ class Database:
             self._ensure_column(conn, "job_reviews", "japanese_media_flag", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "job_reviews", "confidence", "REAL")
             self._ensure_column(conn, "job_reviews", "manual_review_notes", "TEXT")
+            self._ensure_column(conn, "job_reviews", "title_discovery_json", "TEXT")
+            self._ensure_column(conn, "disc_jobs", "source_disc_path", "TEXT")
+            self._ensure_column(conn, "disc_jobs", "split_from_job_id", "INTEGER")
+            self._ensure_column(conn, "source_files", "preview_status", "TEXT NOT NULL DEFAULT 'missing'")
+            self._ensure_column(conn, "source_files", "preview_path", "TEXT")
+            self._ensure_column(conn, "source_files", "preview_error", "TEXT")
+            self._ensure_column(conn, "source_files", "preview_generated_at", "TEXT")
+            self._ensure_column(conn, "source_files", "preview_source_modified_time", "REAL")
+            self._ensure_column(conn, "source_files", "preview_source_size_bytes", "INTEGER")
+            self._ensure_column(conn, "ignored_disc_paths", "job_id", "INTEGER")
+            self._ensure_column(conn, "ignored_disc_paths", "disc_title", "TEXT")
+            self._ensure_column(conn, "ignored_disc_paths", "status", "TEXT NOT NULL DEFAULT 'deleted'")
+            conn.execute("UPDATE disc_jobs SET source_disc_path = disc_path WHERE source_disc_path IS NULL")
 
     @staticmethod
     def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -320,15 +375,138 @@ class Database:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO disc_jobs (disc_title, disc_path, status)
-                VALUES (?, ?, ?)
+                INSERT INTO disc_jobs (disc_title, disc_path, source_disc_path, status)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(disc_path) DO UPDATE SET
                     status=excluded.status,
+                    source_disc_path=COALESCE(disc_jobs.source_disc_path, excluded.source_disc_path),
                     updated_at=CURRENT_TIMESTAMP
                 """,
-                (title, resolved, status),
+                (title, resolved, resolved, status),
             )
             return int(conn.execute("SELECT id FROM disc_jobs WHERE disc_path = ?", (resolved,)).fetchone()["id"])
+
+    def create_split_job(self, parent_job_id: int, source_file_id: int, title: str | None = None) -> int:
+        with self.connect() as conn:
+            parent = conn.execute(
+                """
+                SELECT id, disc_title, disc_path, COALESCE(source_disc_path, disc_path) AS source_disc_path, status
+                FROM disc_jobs
+                WHERE id = ?
+                """,
+                (parent_job_id,),
+            ).fetchone()
+            if parent is None:
+                raise ValueError(f"Unknown parent job: {parent_job_id}")
+            if parent["status"] in {"transferring_to_eddy", "imported_to_jellyfin"}:
+                raise ValueError("Cannot split a job after transfer has started")
+            source = conn.execute(
+                "SELECT id, filename FROM source_files WHERE id = ? AND job_id = ?",
+                (source_file_id, parent_job_id),
+            ).fetchone()
+            if source is None:
+                raise ValueError(f"Source file {source_file_id} is not part of job {parent_job_id}")
+            remaining = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS count FROM source_files WHERE job_id = ? AND id != ?",
+                    (parent_job_id, source_file_id),
+                ).fetchone()["count"]
+            )
+            if remaining == 0:
+                raise ValueError("Split requires at least one source file to remain on the original job")
+            split_index = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS count FROM disc_jobs WHERE split_from_job_id = ?",
+                    (parent_job_id,),
+                ).fetchone()["count"]
+            ) + 1
+            source_disc_path = str(parent["source_disc_path"] or parent["disc_path"])
+            synthetic_disc_path = f"{source_disc_path}::split-{split_index}"
+            child_title = title or Path(source["filename"]).stem or f"{parent['disc_title']} (split {split_index})"
+            conn.execute(
+                """
+                INSERT INTO disc_jobs (disc_title, disc_path, source_disc_path, status, split_from_job_id)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (f"{parent['disc_title']} (split {split_index})", synthetic_disc_path, source_disc_path, "review_needed", parent_job_id),
+            )
+            new_job_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+            conn.execute("UPDATE source_files SET job_id = ? WHERE id = ?", (new_job_id, source_file_id))
+            parent_review = conn.execute("SELECT * FROM job_reviews WHERE job_id = ?", (parent_job_id,)).fetchone()
+            if parent_review is None:
+                review = JobReviewMetadata(job_id=new_job_id, title=child_title, review_status="review_needed")
+            else:
+                review = JobReviewMetadata(
+                    job_id=new_job_id,
+                    title=child_title,
+                    original_title=None,
+                    romanized_title=None,
+                    translated_title=None,
+                    language_script_hints=parent_review["language_script_hints"] if "language_script_hints" in parent_review.keys() else None,
+                    anime_flag=bool(parent_review["anime_flag"]) if "anime_flag" in parent_review.keys() else False,
+                    japanese_media_flag=bool(parent_review["japanese_media_flag"]) if "japanese_media_flag" in parent_review.keys() else False,
+                    confidence=None,
+                    title_discovery_json=None,
+                    manual_review_notes=f"Split from job {parent_job_id}",
+                    year=None,
+                    content_type=parent_review["content_type"],
+                    library_root=parent_review["library_root"],
+                    imdb_id=None,
+                    tmdb_id=None,
+                    tvdb_id=None,
+                    anidb_id=None,
+                    anilist_id=None,
+                    mal_id=None,
+                    notes=None,
+                    review_status="review_needed",
+                )
+            child_review = review
+            parent_review_metadata: JobReviewMetadata | None = None
+            if parent_review is not None:
+                parent_review_metadata = JobReviewMetadata(
+                    job_id=parent_job_id,
+                    title=parent_review["title"],
+                    original_title=parent_review["original_title"],
+                    romanized_title=parent_review["romanized_title"] if "romanized_title" in parent_review.keys() else None,
+                    translated_title=parent_review["translated_title"] if "translated_title" in parent_review.keys() else None,
+                    language_script_hints=parent_review["language_script_hints"] if "language_script_hints" in parent_review.keys() else None,
+                    anime_flag=bool(parent_review["anime_flag"]) if "anime_flag" in parent_review.keys() else False,
+                    japanese_media_flag=bool(parent_review["japanese_media_flag"]) if "japanese_media_flag" in parent_review.keys() else False,
+                    confidence=parent_review["confidence"] if "confidence" in parent_review.keys() else None,
+                    title_discovery_json=json.loads(parent_review["title_discovery_json"]) if "title_discovery_json" in parent_review.keys() and parent_review["title_discovery_json"] else None,
+                    manual_review_notes=parent_review["manual_review_notes"] if "manual_review_notes" in parent_review.keys() else None,
+                    year=parent_review["year"],
+                    content_type=parent_review["content_type"],
+                    library_root=parent_review["library_root"],
+                    imdb_id=parent_review["imdb_id"],
+                    tmdb_id=parent_review["tmdb_id"],
+                    tvdb_id=parent_review["tvdb_id"],
+                    anidb_id=parent_review["anidb_id"],
+                    anilist_id=parent_review["anilist_id"],
+                    mal_id=parent_review["mal_id"],
+                    notes=parent_review["notes"],
+                    review_status="review_in_progress",
+                    work_order_folder=parent_review["work_order_folder"],
+                    work_order_created_at=parent_review["work_order_created_at"],
+                    warnings=json.loads(parent_review["warnings_json"] or "[]"),
+                    conflicts=json.loads(parent_review["conflicts_json"] or "[]"),
+                )
+        self.save_job_review(child_review)
+        if parent_review_metadata is not None:
+            self.save_job_review(parent_review_metadata)
+        self.update_job_status(parent_job_id, "review_in_progress")
+        self.clear_processing_results(parent_job_id)
+        with self.connect() as audit_conn:
+            audit_conn.execute(
+                "INSERT INTO audit_log (job_id, event_type, message, payload_json) VALUES (?, ?, ?, ?)",
+                (
+                    parent_job_id,
+                    "job_split",
+                    f"Split source file {source_file_id} into job {new_job_id}",
+                    json.dumps({"source_file_id": source_file_id, "new_job_id": new_job_id}, ensure_ascii=False),
+                ),
+            )
+        return new_job_id
 
     def upsert_source_file(self, job_id: int, scanned: ScannedFile) -> int:
         identity = f"{scanned.path}|{scanned.size_bytes}|{scanned.modified_time}"
@@ -394,18 +572,40 @@ class Database:
 
     def list_jobs(self) -> list[Job]:
         with self.connect() as conn:
-            rows = conn.execute("SELECT id, disc_title, disc_path, status FROM disc_jobs ORDER BY id").fetchall()
-        return [Job(id=row["id"], disc_title=row["disc_title"], disc_path=row["disc_path"], status=row["status"]) for row in rows]
+            rows = conn.execute("SELECT id, disc_title, disc_path, status, source_disc_path, split_from_job_id FROM disc_jobs ORDER BY id").fetchall()
+        return [
+            Job(
+                id=row["id"],
+                disc_title=row["disc_title"],
+                disc_path=row["disc_path"],
+                status=row["status"],
+                source_disc_path=row["source_disc_path"],
+                split_from_job_id=row["split_from_job_id"],
+            )
+            for row in rows
+        ]
 
     def get_job(self, job_id: int) -> Job | None:
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT id, disc_title, disc_path, status FROM disc_jobs WHERE id = ?",
+                "SELECT id, disc_title, disc_path, status, source_disc_path, split_from_job_id FROM disc_jobs WHERE id = ?",
                 (job_id,),
             ).fetchone()
         if row is None:
             return None
-        return Job(id=row["id"], disc_title=row["disc_title"], disc_path=row["disc_path"], status=row["status"])
+        return Job(
+            id=row["id"],
+            disc_title=row["disc_title"],
+            disc_path=row["disc_path"],
+            status=row["status"],
+            source_disc_path=row["source_disc_path"],
+            split_from_job_id=row["split_from_job_id"],
+        )
+
+    def delete_job(self, job_id: int) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute("DELETE FROM disc_jobs WHERE id = ?", (job_id,))
+            return cursor.rowcount > 0
 
     def update_job_status(self, job_id: int, status: str) -> None:
         with self.connect() as conn:
@@ -413,6 +613,328 @@ class Database:
                 "UPDATE disc_jobs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (status, job_id),
             )
+
+    def enqueue_automation_job(self, job_id: int, force_reprocess: bool = False) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO automation_jobs (
+                    job_id, force_reprocess, state, attempts, last_result, last_error, queued_at, started_at, finished_at, updated_at
+                ) VALUES (?, ?, 'queued', 0, NULL, NULL, CURRENT_TIMESTAMP, NULL, NULL, CURRENT_TIMESTAMP)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    force_reprocess = CASE
+                        WHEN excluded.force_reprocess = 1 THEN 1
+                        ELSE automation_jobs.force_reprocess
+                    END,
+                    state = CASE
+                        WHEN automation_jobs.state = 'running' THEN automation_jobs.state
+                        ELSE 'queued'
+                    END,
+                    last_error = NULL,
+                    last_result = NULL,
+                    started_at = CASE
+                        WHEN automation_jobs.state = 'running' THEN automation_jobs.started_at
+                        ELSE NULL
+                    END,
+                    finished_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (job_id, 1 if force_reprocess else 0),
+            )
+
+    def claim_next_automation_job(self) -> dict | None:
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT job_id, force_reprocess, state, attempts
+                FROM automation_jobs
+                WHERE state = 'queued'
+                ORDER BY queued_at, job_id
+                LIMIT 1
+                """,
+            ).fetchone()
+            if row is None:
+                conn.commit()
+                return None
+            conn.execute(
+                """
+                UPDATE automation_jobs
+                SET state = 'running',
+                    attempts = attempts + 1,
+                    started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE job_id = ?
+                """,
+                (row["job_id"],),
+            )
+            conn.commit()
+        return {
+            "job_id": row["job_id"],
+            "force_reprocess": bool(row["force_reprocess"]),
+            "state": row["state"],
+            "attempts": row["attempts"],
+        }
+
+    def finish_automation_job(self, job_id: int, *, state: str, result: str | None = None, error: str | None = None) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE automation_jobs
+                SET state = ?,
+                    last_result = ?,
+                    last_error = ?,
+                    finished_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE job_id = ?
+                """,
+                (state, result, error, job_id),
+            )
+
+    def reset_stuck_automation_jobs(self) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE automation_jobs
+                SET state = 'queued',
+                    started_at = NULL,
+                    finished_at = NULL,
+                    last_error = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE state = 'running'
+                """
+            )
+            return cursor.rowcount
+
+    def get_automation_job(self, job_id: int) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT job_id, force_reprocess, state, attempts, last_result, last_error, queued_at, started_at, finished_at, updated_at
+                FROM automation_jobs
+                WHERE job_id = ?
+                """,
+                (job_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {key: row[key] for key in row.keys()}
+
+    def list_automation_jobs(self) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT job_id, force_reprocess, state, attempts, last_result, last_error, queued_at, started_at, finished_at, updated_at
+                FROM automation_jobs
+                ORDER BY queued_at, job_id
+                """
+            ).fetchall()
+        return [{key: row[key] for key in row.keys()} for row in rows]
+
+    def queue_preview_job(
+        self,
+        job_id: int,
+        source_file_id: int,
+        source_path: str,
+        preview_path: str,
+        *,
+        source_size_bytes: int,
+        source_modified_time: float,
+        force_reprocess: bool = False,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO preview_jobs (
+                    source_file_id, job_id, source_path, preview_path, state, attempts, last_error,
+                    queued_at, started_at, finished_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'queued', 0, NULL, CURRENT_TIMESTAMP, NULL, NULL, CURRENT_TIMESTAMP)
+                ON CONFLICT(source_file_id) DO UPDATE SET
+                    job_id = excluded.job_id,
+                    source_path = excluded.source_path,
+                    preview_path = excluded.preview_path,
+                    state = CASE
+                        WHEN excluded.state = 'running' THEN preview_jobs.state
+                        ELSE 'queued'
+                    END,
+                    last_error = NULL,
+                    started_at = CASE
+                        WHEN preview_jobs.state = 'running' THEN preview_jobs.started_at
+                        ELSE NULL
+                    END,
+                    finished_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (source_file_id, job_id, source_path, preview_path),
+            )
+            conn.execute(
+                """
+                UPDATE source_files
+                SET preview_status = ?,
+                    preview_path = ?,
+                    preview_error = NULL,
+                    preview_generated_at = NULL,
+                    preview_source_modified_time = ?,
+                    preview_source_size_bytes = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                ("queued" if force_reprocess else "queued", preview_path, source_modified_time, source_size_bytes, source_file_id),
+            )
+
+    def claim_next_preview_job(self, worker_name: str | None = None) -> dict | None:
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT source_file_id, job_id, source_path, preview_path, state, attempts
+                FROM preview_jobs
+                WHERE state = 'queued'
+                ORDER BY queued_at, source_file_id
+                LIMIT 1
+                """,
+            ).fetchone()
+            if row is None:
+                conn.commit()
+                return None
+            conn.execute(
+                """
+                UPDATE preview_jobs
+                SET state = 'running',
+                    attempts = attempts + 1,
+                    started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE source_file_id = ?
+                """,
+                (row["source_file_id"],),
+            )
+            conn.execute(
+                """
+                UPDATE source_files
+                SET preview_status = 'processing',
+                    preview_error = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (row["source_file_id"],),
+            )
+            conn.commit()
+        result = {key: row[key] for key in row.keys()}
+        if worker_name:
+            result["worker_name"] = worker_name
+        return result
+
+    def finish_preview_job(
+        self,
+        source_file_id: int,
+        *,
+        state: str,
+        error: str | None = None,
+        generated_at: str | None = None,
+        preview_path: str | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE preview_jobs
+                SET state = ?,
+                    last_error = ?,
+                    finished_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE source_file_id = ?
+                """,
+                (state, error, source_file_id),
+            )
+            conn.execute(
+                """
+                UPDATE source_files
+                SET preview_status = ?,
+                    preview_error = ?,
+                    preview_generated_at = COALESCE(?, preview_generated_at),
+                    preview_path = COALESCE(?, preview_path),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (state, error, generated_at, preview_path, source_file_id),
+            )
+
+    def reset_stuck_preview_jobs(self) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE preview_jobs
+                SET state = 'queued',
+                    started_at = NULL,
+                    finished_at = NULL,
+                    last_error = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE state = 'running'
+                """
+            )
+            conn.execute(
+                """
+                UPDATE source_files
+                SET preview_status = 'queued',
+                    preview_error = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id IN (SELECT source_file_id FROM preview_jobs WHERE state = 'queued')
+                """
+            )
+            return cursor.rowcount
+
+    def preview_job(self, source_file_id: int) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT source_file_id, job_id, source_path, preview_path, state, attempts, last_error,
+                       queued_at, started_at, finished_at, updated_at
+                FROM preview_jobs
+                WHERE source_file_id = ?
+                """,
+                (source_file_id,),
+            ).fetchone()
+        return {key: row[key] for key in row.keys()} if row else None
+
+    def list_preview_jobs(self) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT source_file_id, job_id, source_path, preview_path, state, attempts, last_error,
+                       queued_at, started_at, finished_at, updated_at
+                FROM preview_jobs
+                ORDER BY queued_at, source_file_id
+                """,
+            ).fetchall()
+        return [{key: row[key] for key in row.keys()} for row in rows]
+
+    def delete_preview_files_for_job(self, job_id: int) -> int:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT preview_path FROM source_files WHERE job_id = ? AND preview_path IS NOT NULL",
+                (job_id,),
+            ).fetchall()
+            deleted = 0
+            for row in rows:
+                path = Path(row["preview_path"])
+                if path.exists():
+                    path.unlink()
+                    deleted += 1
+            conn.execute(
+                """
+                UPDATE source_files
+                SET preview_status = 'missing',
+                    preview_path = NULL,
+                    preview_error = NULL,
+                    preview_generated_at = NULL,
+                    preview_source_modified_time = NULL,
+                    preview_source_size_bytes = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE job_id = ?
+                """,
+                (job_id,),
+            )
+            conn.execute("DELETE FROM preview_jobs WHERE job_id = ?", (job_id,))
+            return deleted
 
     def list_source_files(self, job_id: int) -> list[SourceFileRecord]:
         with self.connect() as conn:
@@ -471,6 +993,8 @@ class Database:
                     dj.id,
                     dj.disc_title,
                     dj.disc_path,
+                    dj.source_disc_path,
+                    dj.split_from_job_id,
                     dj.status,
                     COALESCE(jr.review_status, dj.status, 'review_needed') AS review_status,
                     COUNT(sf.id) AS scanned_file_count,
@@ -496,11 +1020,68 @@ class Database:
                 LEFT JOIN source_files sf ON sf.job_id = dj.id
                 LEFT JOIN classifications c ON c.source_file_id = sf.id
                 LEFT JOIN job_reviews jr ON jr.job_id = dj.id
-                GROUP BY dj.id, dj.disc_title, dj.disc_path, dj.status, jr.review_status
+                GROUP BY dj.id, dj.disc_title, dj.disc_path, dj.source_disc_path, dj.split_from_job_id, dj.status, jr.review_status
                 ORDER BY dj.id
                 """
             ).fetchall()
         return [{key: row[key] for key in row.keys()} for row in rows]
+
+    def list_disc_paths(self) -> list[str]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT COALESCE(source_disc_path, disc_path) AS disc_path FROM disc_jobs ORDER BY id").fetchall()
+        return [row["disc_path"] for row in rows]
+
+    def list_ignored_disc_paths(self) -> list[str]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT disc_path FROM ignored_disc_paths ORDER BY disc_path").fetchall()
+        return [row["disc_path"] for row in rows]
+
+    def list_ignored_jobs(self) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT disc_path, job_id, disc_title, status, reason, created_at
+                FROM ignored_disc_paths
+                ORDER BY created_at DESC, disc_path
+                """
+            ).fetchall()
+        return [{key: row[key] for key in row.keys()} for row in rows]
+
+    def is_ignored_disc_path(self, disc_path: str | Path) -> bool:
+        resolved = str(Path(disc_path).resolve())
+        with self.connect() as conn:
+            row = conn.execute("SELECT 1 FROM ignored_disc_paths WHERE disc_path = ?", (resolved,)).fetchone()
+        return row is not None
+
+    def ignore_disc_path(
+        self,
+        disc_path: str | Path,
+        reason: str = "manual ignore",
+        *,
+        job_id: int | None = None,
+        disc_title: str | None = None,
+        status: str = "deleted",
+    ) -> None:
+        resolved = str(Path(disc_path).resolve())
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO ignored_disc_paths (disc_path, job_id, disc_title, status, reason)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(disc_path) DO UPDATE SET
+                    job_id = excluded.job_id,
+                    disc_title = COALESCE(excluded.disc_title, ignored_disc_paths.disc_title),
+                    status = excluded.status,
+                    reason = excluded.reason
+                """,
+                (resolved, job_id, disc_title, status, reason),
+            )
+
+    def unignore_disc_path(self, disc_path: str | Path) -> bool:
+        resolved = str(Path(disc_path).resolve())
+        with self.connect() as conn:
+            cursor = conn.execute("DELETE FROM ignored_disc_paths WHERE disc_path = ?", (resolved,))
+            return cursor.rowcount > 0
 
     def get_job_review(self, job_id: int) -> JobReviewMetadata:
         with self.connect() as conn:
@@ -522,6 +1103,7 @@ class Database:
             anime_flag=bool(row["anime_flag"]) if "anime_flag" in row.keys() else False,
             japanese_media_flag=bool(row["japanese_media_flag"]) if "japanese_media_flag" in row.keys() else False,
             confidence=row["confidence"] if "confidence" in row.keys() else None,
+            title_discovery_json=json.loads(row["title_discovery_json"]) if "title_discovery_json" in row.keys() and row["title_discovery_json"] else None,
             manual_review_notes=row["manual_review_notes"] if "manual_review_notes" in row.keys() else None,
             year=row["year"],
             content_type=row["content_type"],
@@ -546,10 +1128,10 @@ class Database:
                 """
                 INSERT INTO job_reviews (
                     job_id, title, original_title, romanized_title, translated_title, language_script_hints,
-                    anime_flag, japanese_media_flag, confidence, manual_review_notes, year, content_type, library_root,
+                    anime_flag, japanese_media_flag, confidence, manual_review_notes, title_discovery_json, year, content_type, library_root,
                     imdb_id, tmdb_id, tvdb_id, anidb_id, anilist_id, mal_id, notes,
                     review_status, work_order_folder, work_order_created_at, warnings_json, conflicts_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id) DO UPDATE SET
                     title=excluded.title,
                     original_title=excluded.original_title,
@@ -560,6 +1142,7 @@ class Database:
                     japanese_media_flag=excluded.japanese_media_flag,
                     confidence=excluded.confidence,
                     manual_review_notes=excluded.manual_review_notes,
+                    title_discovery_json=excluded.title_discovery_json,
                     year=excluded.year,
                     content_type=excluded.content_type,
                     library_root=excluded.library_root,
@@ -588,6 +1171,7 @@ class Database:
                     int(review.japanese_media_flag),
                     review.confidence,
                     review.manual_review_notes,
+                    json.dumps(review.title_discovery_json, ensure_ascii=False) if review.title_discovery_json is not None else None,
                     review.year,
                     review.content_type,
                     review.library_root,
@@ -658,6 +1242,19 @@ class Database:
             )
         return reviews
 
+    def list_saved_file_review_ids(self, job_id: int) -> set[int]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT fr.source_file_id
+                FROM file_reviews fr
+                JOIN source_files sf ON sf.id = fr.source_file_id
+                WHERE sf.job_id = ?
+                """,
+                (job_id,),
+            ).fetchall()
+        return {int(row["source_file_id"]) for row in rows}
+
     def save_file_review(self, review: FileReviewDecision) -> None:
         with self.connect() as conn:
             conn.execute(
@@ -692,8 +1289,7 @@ class Database:
                     generated_final_path=excluded.generated_final_path,
                     notes=excluded.notes,
                     warnings_json=excluded.warnings_json,
-                    conflicts_json=excluded.conflicts_json,
-                    updated_at=CURRENT_TIMESTAMP
+                    conflicts_json=excluded.conflicts_json
                 """,
                 (
                     review.source_file_id,
@@ -723,6 +1319,7 @@ class Database:
                     json.dumps(review.conflicts, ensure_ascii=False),
                 ),
             )
+
             conn.execute(
                 """
                 INSERT INTO review_decisions (source_file_id, decision_json, approved)
@@ -752,6 +1349,10 @@ class Database:
     ) -> None:
         with self.connect() as conn:
             conn.execute(
+                "DELETE FROM work_orders WHERE job_id = ? AND source_file_id = ?",
+                (job_id, source_file_id),
+            )
+            conn.execute(
                 """
                 INSERT INTO work_orders (job_id, source_file_id, work_order_path, status, payload_json)
                 VALUES (?, ?, ?, ?, ?)
@@ -766,22 +1367,30 @@ class Database:
                 SELECT id, source_file_id, work_order_path, status, payload_json
                 FROM work_orders
                 WHERE job_id = ?
-                ORDER BY id
+                ORDER BY id DESC
                 """,
                 (job_id,),
             ).fetchall()
         payloads = []
+        seen_source_file_ids: set[int] = set()
         for row in rows:
+            source_file_id = int(row["source_file_id"])
+            if source_file_id in seen_source_file_ids:
+                continue
+            seen_source_file_ids.add(source_file_id)
             payload = json.loads(row["payload_json"])
             payload["_work_order_record_id"] = row["id"]
             payload["_source_file_id"] = row["source_file_id"]
             payload["_work_order_path"] = row["work_order_path"]
             payload["_status"] = row["status"]
             payloads.append(payload)
-        return payloads
+        return list(reversed(payloads))
 
     def save_validation_summary(self, job_id: int, summary: dict, passed: bool) -> None:
         with self.connect() as conn:
+            conn.execute("DELETE FROM validation_results WHERE job_id = ?", (job_id,))
+            conn.execute("DELETE FROM output_files WHERE job_id = ?", (job_id,))
+            conn.execute("DELETE FROM validation_warnings WHERE job_id = ?", (job_id,))
             conn.execute(
                 "INSERT INTO validation_results (job_id, result_json, passed) VALUES (?, ?, ?)",
                 (job_id, json.dumps(summary, ensure_ascii=False), int(passed)),
@@ -818,6 +1427,16 @@ class Database:
                         "INSERT INTO validation_warnings (job_id, source_file_id, severity, message) VALUES (?, ?, ?, ?)",
                         (job_id, item["source_file_id"], "error", error),
                     )
+
+    def clear_processing_results(self, job_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM validation_results WHERE job_id = ?", (job_id,))
+            conn.execute("DELETE FROM output_files WHERE job_id = ?", (job_id,))
+            conn.execute("DELETE FROM validation_warnings WHERE job_id = ?", (job_id,))
+            conn.execute("DELETE FROM transfer_results WHERE job_id = ?", (job_id,))
+            conn.execute("DELETE FROM transfer_attempts WHERE job_id = ?", (job_id,))
+            conn.execute("DELETE FROM transfer_items WHERE job_id = ?", (job_id,))
+            conn.execute("DELETE FROM conflict_records WHERE job_id = ?", (job_id,))
 
     def latest_validation_summary(self, job_id: int) -> dict | None:
         with self.connect() as conn:

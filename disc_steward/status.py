@@ -13,10 +13,10 @@ def build_status_summary(db, config: AppConfig) -> dict:
     recent_errors: list[dict] = []
     for job in jobs:
         validation = db.latest_validation_summary(job.id)
-        if validation and not validation.get("passed"):
+        if job.status == "validation_failed" or (validation and not validation.get("passed")):
             validation_failures += 1
         transfer = db.latest_transfer_summary(job.id)
-        if transfer and transfer.get("status") == "transfer_conflict":
+        if job.status == "transfer_conflict" or (transfer and transfer.get("status") == "transfer_conflict"):
             transfer_conflicts += 1
     subtitle_issues = _count_subtitle_issues(db)
     cleanup_items = db.list_cleanup_eligibility()
@@ -31,8 +31,8 @@ def build_status_summary(db, config: AppConfig) -> dict:
         "jobs_needing_validation": counts["validation_needed"],
         "jobs_ready_for_transfer": counts["transfer_ready"] + counts["validated"],
         "jobs_imported": counts["imported_to_jellyfin"],
-        "validation_failures": validation_failures + counts["validation_failed"],
-        "transfer_conflicts": transfer_conflicts + counts["transfer_conflict"],
+        "validation_failures": validation_failures,
+        "transfer_conflicts": transfer_conflicts,
         "subtitle_issues_outstanding": subtitle_issues,
         "cleanup_eligible_items": sum(1 for item in cleanup_items if item["eligible"]),
         "recent_errors": recent_errors[-10:],

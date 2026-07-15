@@ -11,10 +11,9 @@ The current version implements Phases 1-4 safety scaffolding: SQLite state on th
 3. Scan metadata and classifications are stored in SQLite.
 4. Review decisions and metadata are entered in the local web UI.
 5. Approved jobs generate ffmpeg work-order JSON under Gospel's Barnabas mount, using Barnabas-native paths inside the JSON.
-6. ffmpeg writes processed outputs back to Barnabas under each work order's `barnabas_validation_output_dir`.
-7. Disc Steward validates each output against the work order and source scan.
-8. Validated files are copied through Gospel's Eddy mount to Eddy `.incoming/disc-steward/job_<job_id>/`, verified, then moved into final Jellyfin library folders.
-9. If configured, Disc Steward asks Jellyfin to refresh after final placement.
+6. When `processing.method: ssh`, Disc Steward dispatches the ffmpeg command to Barnabas over SSH so the encode runs on Barnabas instead of Gospel. The actual encode should run inside Barnabas's Docker container rather than depending on host-level tools. The container image is built and stored under `/mnt/data1/docker/disc-steward-ffmpeg` on Barnabas.
+7. Validated files are copied through Gospel's Eddy mount to Eddy `.incoming/disc-steward/job_<job_id>/`, verified, then moved into final Jellyfin library folders.
+
 
 Raw rips stay on Barnabas. ffmpeg outputs stay on Barnabas. Only final validated files are transferred to Eddy.
 
@@ -77,9 +76,30 @@ python -m disc_steward transfer --config config.yaml --job-id 184
 python -m disc_steward cleanup-plan --config config.yaml
 python -m disc_steward cleanup --config config.yaml
 python -m disc_steward status --config config.yaml
+python -m disc_steward watch --config config.yaml --once
+python -m disc_steward preview-worker --config config.yaml
 ```
 
-`serve` starts the interactive review UI at `http://127.0.0.1:8765` by default. `process` creates local work-order JSON for jobs that have passed review and runs ffmpeg when not in dry-run mode. `validate` inspects ffmpeg outputs for a reviewed job and records pass/fail details. `transfer` copies only validated outputs to Eddy incoming storage, verifies them, and performs final placement. `cleanup-plan` never changes files. `cleanup` only runs when explicitly enabled, respects dry-run, and refuses ambiguous jobs. `status` prints a post-import dashboard summary.
+`serve` starts the interactive review UI at `http://127.0.0.1:8765` by default. `process` creates local work-order JSON for jobs that have passed review and runs ffmpeg when not in dry-run mode. Set `processing.method: ssh` plus a Barnabas SSH target, user, and Docker image in `config.yaml` to send the heavy encode stage to Barnabas instead of running it on Gospel. On Barnabas, the actual encode should run inside the Dockerized processing environment rather than depending on host-level tools. `validate` inspects ffmpeg outputs for a reviewed job and records pass/fail details. `transfer` copies only validated outputs to Eddy incoming storage, verifies them, and performs final placement. `preview-worker` runs the Barnabas preview queue and generates browser-native MP4 previews. `cleanup-plan` never changes files. `cleanup` only runs when explicitly enabled, respects dry-run, and refuses ambiguous jobs. `status` prints a post-import dashboard summary. `watch` polls for new completed disc folders, skips folders already recorded in SQLite, and can take a lock file so a service manager or manual operator does not start a duplicate watcher.
+
+## Watcher service
+
+For a long-running watcher on Gospel, install the example systemd unit from `deploy/systemd/disc-steward-watch.service`, adjust the user/path/config lines if needed, and enable it with systemd. The unit uses the `disc-steward watch` CLI directly, adds a runtime lock under `/run/disc-steward`, and restarts on failure.
+
+## Preview worker service
+
+For a long-running preview encoder on Barnabas, install `deploy/systemd/disc-steward-preview.service`, adjust the user/path/config lines if needed, and enable it with systemd. The unit uses the `disc-steward preview-worker` CLI directly and runs the Barnabas-side preview queue separately from the controller UI.
+
+
+When `notifications.enabled: true` and the `notifications` section is configured for ntfy, Disc Steward sends only important alerts:
+
+- a new disc folder is ready for review
+- Barnabas encode starts and finishes
+- validation passes or fails
+- transfer passes or fails
+- watcher errors
+
+The ntfy token is read from `DISC_STEWARD_NTFY_TOKEN` if it is not set directly in config. For the running watcher service, keep that value in `~/.config/disc-steward/disc-steward.env` so it survives reboots.
 
 ## Review UI
 
@@ -88,6 +108,8 @@ Run:
 ```bash
 python -m disc_steward serve --config config.yaml
 ```
+
+The review UI links a versioned, vendored `static/win31-core.css` artifact from the Style design-system package before its existing inline stylesheet. That inline stylesheet remains the visual fallback during the incremental migration. Do not hand-edit the vendored file: refresh it from a built and validated `@flancrest/win31-core` package artifact when upgrading the design-system version.
 
 The job list shows each scanned disc folder, status, file count, likely main feature, probable extras, subtitle issues, transcode-risk issues, and review status. Open a job to review all ripped files grouped as main feature candidates, possible episodes, extras, trailers/promos, featurettes/documentaries, deleted scenes, menu/logo/bumper candidates, and manual review.
 

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import subprocess
-from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -13,6 +13,7 @@ from .models import AudioStream, FileReviewDecision, GeneratedPath, JobReviewMet
 from .review import validate_review_ready
 from .subtitle_extraction import IMAGE_SUBTITLE_CODECS, SubtitleSidecar, build_subtitle_sidecar_name, extract_subtitle_sidecars
 from .subtitle_planner import generate_subtitle_plan, plan_to_dict
+from .notifications import send_notification
 
 INVALID_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 METADATA_FILENAME_KEYS = (
@@ -34,6 +35,13 @@ EXTRA_ROLES = {
     "promo",
     "alternate_cut",
     "commentary_variant",
+}
+ROLE_SUBDIRECTORIES = {
+    "trailer": "trailers",
+    "promo": "trailers",
+    "featurette": "featurettes",
+    "deleted_scene": "deleted-scenes",
+    "menu_or_bumper": "menus",
 }
 TEXT_SUBTITLE_CODECS = {"subrip", "srt", "webvtt", "mov_text"}
 ASS_SUBTITLE_CODECS = {"ass", "ssa"}
@@ -108,14 +116,24 @@ def _build_path_for_file(config: AppConfig, job: JobReviewMetadata, decision: Fi
         return library_root / parent / f"Season {season:02d}" / filename
     elif decision.role in EXTRA_ROLES or decision.content_type == "extra":
         filename = f"{label}.mkv"
-        return library_root / _movie_folder(job) / "extras" / filename
+        subdirectory = ROLE_SUBDIRECTORIES.get(decision.role, "extras")
+        return library_root / _movie_folder(job) / subdirectory / filename
     else:
-        folder = _movie_folder(job)
-        filename = f"{folder}{_metadata_suffix(job)}.mkv"
+        filename = f"{_movie_folder(job)}{_metadata_suffix(job)}.mkv"
     if _is_episode_like(job, decision):
         season = decision.season_number if decision.season_number is not None else 1
         return library_root / parent / f"Season {season:02d}" / filename
+    if decision.role in EXTRA_ROLES or decision.content_type == "extra":
+        subdirectory = ROLE_SUBDIRECTORIES.get(decision.role, "extras")
+        return library_root / _movie_folder(job) / subdirectory / filename
     return library_root / _movie_folder(job) / filename
+
+
+def _suffix_collision(path: Path, index: int) -> Path:
+    suffix = f"_{index}"
+    if path.suffix:
+        return path.with_name(f"{path.stem}{suffix}{path.suffix}")
+    return path.with_name(f"{path.name}{suffix}")
 
 
 def generate_final_paths(
@@ -125,22 +143,21 @@ def generate_final_paths(
 ) -> dict[int, GeneratedPath]:
     included = [decision for decision in decisions if decision.include_in_work_order]
     controller_paths = {decision.source_file_id: _build_path_for_file(config, job, decision) for decision in included}
-    final_paths = {source_file_id: config.to_eddy_path(path) for source_file_id, path in controller_paths.items()}
-    counts = Counter(str(path) for path in final_paths.values())
     generated: dict[int, GeneratedPath] = {}
-    for source_file_id, final_path in final_paths.items():
-        controller_path = controller_paths[source_file_id]
-        conflicts: list[str] = []
-        if counts[str(final_path)] > 1:
-            conflicts.append("duplicate generated final path")
-        if controller_path.exists():
-            conflicts.append("final path already exists")
+    used_final_paths: set[str] = set()
+    for source_file_id, controller_path in controller_paths.items():
+        final_path = config.to_eddy_path(controller_path)
+        suffix_index = 0
+        while str(final_path) in used_final_paths or final_path.exists():
+            suffix_index += 1
+            final_path = config.to_eddy_path(_suffix_collision(controller_path, suffix_index))
+        used_final_paths.add(str(final_path))
         generated[source_file_id] = GeneratedPath(
             source_file_id=source_file_id,
             final_path=final_path,
             output_name=final_path.name,
             controller_path=controller_path,
-            conflicts=conflicts,
+            conflicts=[],
         )
     return generated
 
@@ -185,20 +202,22 @@ def _metadata_ids(job: JobReviewMetadata, decision: FileReviewDecision) -> dict[
     return {key: value for key, value in pairs.items() if value}
 
 
-def _subtitle_warning_messages(source: ScannedFile) -> list[str]:
+def _subtitle_warning_messages(source: ScannedFile, *, convert_image_subtitles_to_srt: bool) -> list[str]:
     warnings: list[str] = []
     image_streams = [stream for stream in source.subtitle_streams if (stream.codec or "").lower() in IMAGE_SUBTITLE_CODECS]
-    if image_streams:
+    if image_streams and convert_image_subtitles_to_srt:
         warnings.append("image subtitle streams will be OCR'd into external SRT sidecars")
     if any((stream.codec or "").lower() in ASS_SUBTITLE_CODECS for stream in source.subtitle_streams):
         warnings.append("ASS/SSA subtitles will be converted to external SRT sidecars")
     return warnings
 
 
-def _subtitle_outputs_for_source(source: ScannedFile, video_name: str) -> list[dict]:
+def _subtitle_outputs_for_source(source: ScannedFile, video_name: str, *, convert_image_subtitles_to_srt: bool) -> list[dict]:
     outputs: list[dict] = []
     for ordinal, stream in enumerate(source.subtitle_streams):
         codec = (stream.codec or "").lower()
+        if codec in IMAGE_SUBTITLE_CODECS and not convert_image_subtitles_to_srt:
+            continue
         outputs.append(
             {
                 "source_stream_index": stream.index,
@@ -224,7 +243,7 @@ def _build_ffmpeg_command(config: AppConfig, source: ScannedFile, decision: File
     elif profile == "h265_archive_friendly":
         command.extend(["-c:v", "libx265", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p10le", "-c:a", "aac", "-b:a", "192k"])
     else:
-        command.extend(["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k"])
+        command.extend(["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k"])
     command.append("-sn")
     command.append(str(output_path))
     return command
@@ -266,8 +285,17 @@ def build_ffmpeg_item_payload(
     )
     warnings = list(getattr(decision, "warnings", []))
     if source is not None:
-        warnings.extend(_subtitle_warning_messages(source))
-    subtitle_outputs = _subtitle_outputs_for_source(source, final_path.name) if source is not None else []
+        warnings.extend(
+            _subtitle_warning_messages(
+                source,
+                convert_image_subtitles_to_srt=config.subtitle_planning.convert_image_subtitles_to_srt,
+            )
+        )
+    subtitle_outputs = _subtitle_outputs_for_source(
+        source,
+        final_path.name,
+        convert_image_subtitles_to_srt=config.subtitle_planning.convert_image_subtitles_to_srt,
+    ) if source is not None else []
     payload = {
         "job_id": job_id,
         "item_id": item_id,
@@ -298,11 +326,10 @@ def build_ffmpeg_item_payload(
             config,
             source,
             decision,
-            config.to_barnabas_path(config.validation_needed_path / f"job_{job_id}") / final_path.name,
+            config.validation_needed_path / f"job_{job_id}" / final_path.name,
             subtitle_plan,
         )
     return payload
-
 
 # Legacy name kept for compatibility with older tests and callers.
 build_fileflows_item_payload = build_ffmpeg_item_payload
@@ -325,6 +352,47 @@ def _source_from_row(row: dict) -> ScannedFile:
         makemkv_title=row["makemkv_title"],
         raw_ffprobe=json.loads(row["raw_ffprobe_json"] or "{}"),
     )
+
+
+def build_ffmpeg_runner(config: AppConfig) -> Callable[[list[str]], object]:
+    method = (config.processing.method or "local").strip().lower()
+    if method in {"", "local"}:
+        return lambda command: subprocess.run(command, check=True)
+    if method == "ssh":
+        target = config.processing.ssh_target.strip()
+        if not target:
+            raise ValueError("processing.ssh_target is required when processing.method is ssh")
+        user = config.processing.ssh_user.strip()
+        ssh_destination = f"{user}@{target}" if user else target
+        ssh_command = ["ssh", *config.processing.ssh_options, ssh_destination]
+        host_pipeline_root = config.to_barnabas_path(config.pipeline_root)
+        docker_image = config.processing.docker_image.strip()
+        if not docker_image:
+            raise ValueError("processing.docker_image is required when processing.method is ssh")
+        docker_state_root = config.processing.docker_state_root.strip()
+        if not docker_state_root:
+            raise ValueError("processing.docker_state_root is required when processing.method is ssh")
+
+        def run_remote(command: list[str]) -> object:
+            translated = [str(config.to_barnabas_path(part)) for part in command]
+            docker_command = [
+                "docker",
+                "run",
+                "--rm",
+                "--init",
+                "-v",
+                f"{host_pipeline_root}:{host_pipeline_root}",
+                "-v",
+                f"{docker_state_root}:{docker_state_root}",
+                "-w",
+                str(host_pipeline_root),
+                docker_image,
+                *translated,
+            ]
+            return subprocess.run([*ssh_command, shlex.join(docker_command)], check=True)
+
+        return run_remote
+    raise ValueError(f"Unknown processing.method: {config.processing.method}")
 
 
 def _run_ffmpeg(command: list[str], runner: Callable[[list[str]], object] | None = None) -> None:
@@ -364,8 +432,17 @@ def create_ffmpeg_processing_jobs(
     created = datetime.now(timezone.utc).isoformat()
     item_paths: list[Path] = []
     warnings: list[str] = []
-    run_ffmpeg = ffmpeg_runner or (lambda command: subprocess.run(command, check=True))
+    run_ffmpeg = ffmpeg_runner or build_ffmpeg_runner(config)
+    remote_processing = (config.processing.method or "local").strip().lower() == "ssh"
     processing_status = "validation_needed"
+    if not config.dry_run and included:
+        send_notification(
+            config,
+            f"Encode started on Barnabas: job {job_id}",
+            f"Barnabas is processing {len(included)} item(s) for job {job_id}.",
+            priority="default",
+            tags=["encode", "started"],
+        )
     for index, decision in enumerate(included, start=1):
         row = source_rows[decision.source_file_id]
         source = _source_from_row(row)
@@ -386,10 +463,13 @@ def create_ffmpeg_processing_jobs(
         warnings.extend(decision.warnings)
         warnings.extend(payload.get("warnings", []))
         if not config.dry_run:
-            output_path = Path(payload["barnabas_validation_output_dir"]) / payload["output_name"]
-            if output_path.exists() and not config.overwrite_existing:
-                raise FileExistsError(f"output already exists: {output_path}")
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path = config.validation_needed_path / f"job_{job_id}" / payload["output_name"]
+            if not remote_processing:
+                if output_path.exists() and not config.overwrite_existing:
+                    raise FileExistsError(f"output already exists: {output_path}")
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                _run_ffmpeg(["mkdir", "-p", str(output_path.parent)], run_ffmpeg)
             _run_ffmpeg(payload["ffmpeg_command"], run_ffmpeg)
             if not output_path.exists():
                 raise RuntimeError(f"ffmpeg did not create expected output: {output_path}")
@@ -400,6 +480,7 @@ def create_ffmpeg_processing_jobs(
                 output_path.parent,
                 payload["output_name"],
                 ffmpeg_runner=run_ffmpeg,
+                convert_image_subtitles_to_srt=config.subtitle_planning.convert_image_subtitles_to_srt,
             )
             payload["subtitle_outputs"] = [
                 {
@@ -417,11 +498,12 @@ def create_ffmpeg_processing_jobs(
             item_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
             db.save_work_order_record(job_id, decision.source_file_id, str(item_path), payload, status="processed")
 
+    source_disc_path = Path(job.source_disc_path or job.disc_path)
     manifest = {
         "job_id": job_id,
         "disc_folder": job.disc_title,
-        "disc_path": str(config.to_barnabas_path(Path(job.disc_path))),
-        "controller_disc_path": job.disc_path,
+        "disc_path": str(config.to_barnabas_path(source_disc_path)),
+        "controller_disc_path": str(source_disc_path),
         "parent_title": job_review.title,
         "year": job_review.year,
         "content_type": job_review.content_type,
@@ -447,6 +529,14 @@ def create_ffmpeg_processing_jobs(
         job_id,
         {"folder": str(job_dir), "dry_run": config.dry_run},
     )
+    if not config.dry_run:
+        send_notification(
+            config,
+            f"Encode finished on Barnabas: job {job_id}",
+            f"Barnabas finished ffmpeg processing for job {job_id} with {len(item_paths)} item(s).",
+            priority="default",
+            tags=["encode", "complete"],
+        )
     return job_dir
 
 

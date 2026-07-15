@@ -1,0 +1,162 @@
+You are working on my disc-steward video processing software.
+
+Goal:
+Add browser-playable video previews to the disc review workflow. The original disc/video files often use codecs or containers that browsers cannot play directly, so the app should generate small H.264/AAC MP4 preview files that the web UI can play with a standard HTML5 <video> element.
+
+Current environment:
+- Gospel runs the disc-steward web UI and coordinates most of the pipeline.
+- Barnabas performs heavy video conversion work.
+- Eddy/NAS is the final resting place for processed files.
+- Gospel and Barnabas both have access to the relevant shared video storage/mounts.
+- Some discs contain many titles/files, sometimes 50 to 100+ items, so the system must not eagerly transcode everything in a way that blocks the UI or overwhelms Barnabas.
+- The browser preview feature is for review/identification, not archival quality.
+
+Please inspect the existing repo and implement this in a way that fits the current architecture.
+
+Required behavior:
+1. Add per-title preview tracking.
+   Each title/video item should be able to track:
+   - source path
+   - screenshot path, if already present
+   - preview path
+   - preview status: missing, queued, processing, ready, failed
+   - preview error message, if failed
+   - preview generated timestamp
+   - duration/size/codec metadata if already available or easy to gather
+
+2. Add browser preview playback to the web UI.
+   - For each title, show the existing screenshot as the default visual preview.
+   - If a preview MP4 exists and preview_status is ready, show a Play Preview button or embedded HTML5 video player instead.
+   - The browser should play the generated MP4 through a normal <video controls> element.
+   - Do not try to make the browser play the original MKV/MPEG-2/etc. directly.
+   - The UI should remain usable for discs with many titles, such as 78 files.
+   - Include useful status indicators: missing, queued, processing, ready, failed.
+   - Include a way to request preview generation for a single title.
+   - If it fits the current UI, also include a “Generate previews for this disc” action, but this should enqueue jobs rather than perform work synchronously.
+
+3. Add a preview generation job system.
+   Prefer the simplest clean approach that fits the existing app:
+   - If disc-steward already has a database/job queue, add a preview job type there.
+   - If not, add a simple shared job-folder queue using JSON files.
+
+   The queue should support:
+   - pending
+   - running/processing
+   - done/ready
+   - failed
+   - retries or at least a clear failed state
+   - job logs or error details
+   - safe handling so two workers do not process the same job at once
+
+4. Add a Barnabas worker mode.
+   Barnabas should be able to run a disc-steward worker process that picks up preview jobs and runs ffmpeg to create MP4 preview files.
+   The worker should:
+   - read jobs created by Gospel
+   - resolve shared paths correctly
+   - run ffmpeg
+   - write the preview MP4 to the configured preview output directory
+   - update job/title preview status when complete or failed
+   - avoid unlimited parallel jobs
+   - default to one preview job at a time unless configuration says otherwise
+
+5. Use browser-safe preview encoding.
+   Generate previews as H.264 video plus AAC audio in MP4.
+
+   Default ffmpeg behavior should be approximately:
+   - deinterlace with yadif
+   - scale to 480p height while preserving aspect ratio
+   - encode H.264
+   - encode AAC stereo audio
+   - use +faststart for browser playback
+   - keep quality small but good enough for review
+
+   Suggested command shape:
+   ffmpeg -y \
+     -i "$SOURCE" \
+     -vf "yadif,scale=-2:480" \
+     -c:v h264_nvenc \
+     -preset p5 \
+     -cq 28 \
+     -c:a aac \
+     -b:a 96k \
+     -ac 2 \
+     -movflags +faststart \
+     "$OUTPUT"
+
+   However, make the encoder configurable. Barnabas usually has NVIDIA/NVENC, but the app should allow falling back to libx264 if NVENC is unavailable.
+
+   Include a CPU fallback command similar to:
+   ffmpeg -y \
+     -i "$SOURCE" \
+     -vf "yadif,scale=-2:480" \
+     -c:v libx264 \
+     -preset veryfast \
+     -crf 26 \
+     -c:a aac \
+     -b:a 96k \
+     -ac 2 \
+     -movflags +faststart \
+     "$OUTPUT"
+
+6. Add configuration.
+   Add config values or environment variables for:
+   - preview output directory
+   - preview public URL/path
+   - worker enabled/disabled
+   - worker name, e.g. barnabas
+   - max concurrent preview jobs, default 1
+   - ffmpeg path
+   - preferred preview encoder: h264_nvenc or libx264
+   - preview height, default 480
+   - preview quality, default cq 28 for NVENC or crf 26 for libx264
+   - whether previews are generated lazily or automatically
+
+7. Avoid wasting work.
+   - Do not regenerate a preview if preview_status is ready and the preview file exists, unless explicitly requested.
+   - If the source file changed or output file is missing, allow regeneration.
+   - Use atomic output writes: write to a temporary file first, then rename to the final preview path only after ffmpeg succeeds.
+   - Keep preview generation asynchronous. The web request should enqueue the job and return quickly.
+
+8. Handle many files cleanly.
+   For discs with many titles:
+   - Do not load every video player at once.
+   - Show screenshots/status in the list.
+   - Only load the video element when the user expands/clicks a title or when the preview is ready and requested.
+   - Add sorting/filtering if straightforward, especially by duration, review status, and preview status.
+   - Make it easy to hide likely junk clips under a configurable duration threshold if the app already supports review filters.
+
+9. Path handling.
+   Prefer logical/shared storage paths so Gospel and Barnabas can both resolve files reliably.
+   If Gospel and Barnabas see the same share at different mount points, add path mapping config rather than hardcoding machine-specific paths.
+
+10. Documentation.
+   Update the README or project docs with:
+   - how to enable preview generation
+   - how to run the Barnabas worker
+   - required ffmpeg/NVENC notes
+   - environment variables/config values
+   - example Docker/systemd usage if the project already uses those
+   - troubleshooting notes for failed previews
+
+11. Tests.
+   Add or update tests where practical:
+   - enqueue preview job
+   - prevent duplicate ready previews
+   - worker marks success
+   - worker marks failure with error message
+   - output path generation
+   - config defaults
+
+Implementation preference:
+- Keep the first version simple and reliable.
+- Prefer lazy/on-demand preview generation over eagerly transcoding every title.
+- Prioritize a working review workflow over fancy player features.
+- Do not disturb the archival/original files.
+- Do not move final outputs to Eddy as part of preview generation. Preview generation should be separate from final archival encoding/move steps unless the existing pipeline has a clean hook for it.
+
+After implementation:
+- Show me what files changed.
+- Explain how Gospel enqueues preview jobs.
+- Explain how Barnabas runs the worker.
+- Give me the exact command to start the worker on Barnabas.
+- Give me one small test procedure using an existing disc with many titles.

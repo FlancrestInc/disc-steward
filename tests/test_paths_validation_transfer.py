@@ -170,6 +170,70 @@ def test_local_mount_transfer_places_to_controller_eddy_path_but_records_eddy_pa
         assert (controller_final.parent / subtitle["output_name"]).exists()
 
 
+def test_unicode_paths_survive_work_order_validation_and_transfer(tmp_path):
+    config = AppConfig.default_for_root(tmp_path)
+    config.raw_rip_path = tmp_path / "média-pipeline" / "01_disc_rips_raw"
+    config.fileflows_work_order_path = tmp_path / "média-pipeline" / "04_ready_for_fileflows"
+    config.validation_needed_path = tmp_path / "média-pipeline" / "06_validation_needed"
+    config.eddy_incoming_path = tmp_path / "éddy" / ".incoming" / "disc-steward"
+    config.eddy_library_roots = {"Movies": tmp_path / "éddy" / "Movies"}
+    config.dry_run = False
+
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+
+    disc = config.raw_rip_path / "Amélie"
+    disc.mkdir(parents=True)
+    source_path = disc / "título_ñ_t00.mkv"
+    source_path.write_bytes(b"source" * 800)
+
+    job_id = db.upsert_job(disc, "reviewed")
+    source_id = db.upsert_source_file(job_id, _source(source_path, size=source_path.stat().st_size))
+    review = JobReviewMetadata(job_id=job_id, title="Amélie", year=2001, content_type="movie", library_root="Movies", review_status="reviewed")
+    db.save_job_review(review)
+    decision = FileReviewDecision(
+        source_file_id=source_id,
+        role="main_feature",
+        content_type="movie",
+        final_display_name="Amélie",
+        encoding_profile="universal_h264_aac_srt",
+        subtitle_policy="ocr_image_subtitles_to_srt_preserve_original",
+    )
+    final_path = generate_final_paths(config, review, [decision])[source_id].final_path
+    decision.generated_final_path = str(final_path)
+    db.save_file_review(decision)
+
+    previous_dry_run = config.dry_run
+    config.dry_run = True
+    try:
+        work_order_dir = create_ffmpeg_processing_jobs(
+            db,
+            config,
+            job_id,
+            ffmpeg_runner=lambda command: Path(command[-1]).write_bytes(b"ffmpeg-output" * 300),
+        )
+    finally:
+        config.dry_run = previous_dry_run
+
+    item_payload = json.loads((work_order_dir / "items" / "item_001.process.json").read_text(encoding="utf-8"))
+    output_dir = config.validation_needed_path / f"job_{job_id}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output = output_dir / Path(final_path).name
+    output.write_bytes(b"validated-output" * 300)
+    for subtitle in item_payload.get("subtitle_outputs", []):
+        (output_dir / subtitle["output_name"]).write_text("1\n00:00:00,000 --> 00:00:01,000\nSubtitle\n\n", encoding="utf-8")
+
+    validation_summary = validate_job_outputs(db, config, job_id, ffprobe_runner=lambda _path: _output_ffprobe())
+    transfer_summary = transfer_job_to_eddy(db, config, job_id)
+
+    assert validation_summary.passed is True
+    assert validation_summary.items[0].matched_output_path == str(output)
+    assert transfer_summary.status == "imported_to_jellyfin"
+    assert transfer_summary.items[0].final_path == str(final_path)
+    assert final_path.exists()
+    assert (config.eddy_incoming_path / f"job_{job_id}" / Path(final_path).name).exists() is False
+
+
 def test_rsync_transfer_includes_subtitle_sidecars(tmp_path, monkeypatch):
     config = AppConfig.default_for_root(tmp_path)
     config.transfer_method = "rsync"
@@ -202,8 +266,6 @@ def test_rsync_transfer_includes_subtitle_sidecars(tmp_path, monkeypatch):
         ["rsync", str(subtitle), "eddy:/incoming/job_42/Movie.eng.srt"],
     ]
     assert summary.items[0].subtitle_paths == ["eddy:/incoming/job_42/Movie.eng.srt"]
-
-
 
 def test_cleanup_treats_missing_controller_mount_as_unavailable_not_deleted_media(tmp_path):
     config = _gospel_config(tmp_path)

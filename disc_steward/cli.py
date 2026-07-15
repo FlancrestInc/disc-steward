@@ -3,17 +3,20 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from contextlib import contextmanager
+from pathlib import Path
 
 from .config import load_config
 from .cleanup import execute_cleanup, plan_cleanup
 from .db import Database
 from .reports import generate_reports
-from .scanner import scan_completed_rips
+from .scanner import scan_completed_rips, watch_completed_rips
 from .status import build_status_summary, format_status_summary
 from .transfer import transfer_job_to_eddy
 from .utils import configure_logging
 from .validation import validate_job_outputs
-from .web import serve_review_ui
+from .web import run_automation_worker, serve_review_ui
+from .preview import run_preview_worker
 from .work_orders import create_ffmpeg_processing_jobs
 
 LOG = logging.getLogger(__name__)
@@ -39,7 +42,31 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("cleanup-plan", parents=[shared], help="Plan cleanup eligibility without changing files")
     sub.add_parser("cleanup", parents=[shared], help="Execute configured cleanup; disabled and dry-run by default")
     sub.add_parser("status", parents=[shared], help="Show pipeline status summary")
+    automation = sub.add_parser("automation-worker", parents=[shared], help="Run the durable automation queue worker")
+    automation.add_argument("--poll-interval", type=float, default=1.0, help="Seconds to sleep when the queue is empty")
+    preview = sub.add_parser("preview-worker", parents=[shared], help="Generate browser-native video previews on Barnabas")
+    preview.add_argument("--poll-interval", type=float, default=1.0, help="Seconds to sleep when the queue is empty")
+    watch = sub.add_parser("watch", parents=[shared], help="Continuously scan for new completed rips")
+    watch.add_argument("--interval", type=float, default=30.0, help="Seconds between polling scans")
+    watch.add_argument("--once", action="store_true", help="Run one scan cycle and exit")
+    watch.add_argument("--lock-file", default=argparse.SUPPRESS, help="Optional exclusive lock file to prevent duplicate watchers")
     return parser
+
+
+@contextmanager
+def _exclusive_watch_lock(lock_file: Path):
+    import fcntl
+    import os
+
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    with lock_file.open("w", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        handle.write(f"{os.getpid()}\n")
+        handle.flush()
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -111,6 +138,49 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if not summary.errors or config.cleanup.dry_run else 2
     if args.command == "status":
         print(format_status_summary(build_status_summary(db, config)))
+        return 0
+    if args.command == "automation-worker":
+        try:
+            run_automation_worker(db, config, poll_interval=args.poll_interval)
+        except KeyboardInterrupt:
+            print("automation worker stopped by user")
+            return 130
+        return 0
+    if args.command == "preview-worker":
+        try:
+            run_preview_worker(db, config, poll_interval=args.poll_interval, worker_name=config.preview.worker_name)
+        except KeyboardInterrupt:
+            print("preview worker stopped by user")
+            return 130
+        return 0
+    if args.command == "watch":
+        lock_file = Path(args.lock_file) if hasattr(args, "lock_file") else None
+        try:
+            if lock_file is not None:
+                with _exclusive_watch_lock(lock_file):
+                    discovered = watch_completed_rips(
+                        db,
+                        config,
+                        interval_seconds=args.interval,
+                        max_cycles=1 if args.once else None,
+                    )
+            else:
+                discovered = watch_completed_rips(
+                    db,
+                    config,
+                    interval_seconds=args.interval,
+                    max_cycles=1 if args.once else None,
+                )
+        except BlockingIOError:
+            print(f"watch lock already held: {lock_file}")
+            return 1
+        except KeyboardInterrupt:
+            print("watch stopped by user")
+            return 130
+        if args.once:
+            print(f"watch-scan: {len(discovered)} job(s)")
+            for job_id in discovered:
+                print(job_id)
         return 0
     return 1
 

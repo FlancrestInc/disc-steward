@@ -85,11 +85,36 @@ class Classification:
 
 
 @dataclass
+class TitleDiscoverySignal:
+    source: str
+    value: str
+    weight: float = 1.0
+    confidence: float = 0.0
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass
+class TitleDiscoveryResult:
+    title: str = ""
+    original_title: str | None = None
+    romanized_title: str | None = None
+    translated_title: str | None = None
+    year: int | None = None
+    content_type: str = "unknown"
+    library_root: str = "Movies"
+    confidence: float = 0.0
+    signals: list[TitleDiscoverySignal] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Job:
     id: int
     disc_title: str
     disc_path: str
     status: str
+    source_disc_path: str | None = None
+    split_from_job_id: int | None = None
 
 
 @dataclass
@@ -101,6 +126,21 @@ class SourceFileRecord:
     size_bytes: int
     modified_time: float
     duration_seconds: float | None
+
+
+@dataclass
+class PreviewJob:
+    source_file_id: int
+    job_id: int
+    state: str
+    preview_path: str
+    source_path: str
+    attempts: int = 0
+    last_error: str | None = None
+    queued_at: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    updated_at: str | None = None
 
 
 @dataclass
@@ -137,6 +177,7 @@ class JobReviewMetadata:
     anime_flag: bool = False
     japanese_media_flag: bool = False
     confidence: float | None = None
+    title_discovery_json: dict[str, Any] | None = None
     manual_review_notes: str | None = None
     year: int | None = None
     content_type: str = "unknown"

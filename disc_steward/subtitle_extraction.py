@@ -48,6 +48,7 @@ def extract_subtitle_sidecars(
     video_name: str,
     ffmpeg_runner: Callable[[list[str]], object] | None = None,
     ocr_engine: Any | None = None,
+    convert_image_subtitles_to_srt: bool = True,
 ) -> list[SubtitleSidecar]:
     output_dir.mkdir(parents=True, exist_ok=True)
     streams = list(source.subtitle_streams)
@@ -77,6 +78,8 @@ def extract_subtitle_sidecars(
             )
             continue
         if codec in IMAGE_SUBTITLE_CODECS:
+            if not convert_image_subtitles_to_srt:
+                continue
             warnings: list[str] = []
             if active_ocr_engine is None:
                 active_ocr_engine = _create_ocr_engine()

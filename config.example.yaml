@@ -26,6 +26,19 @@ path_mappings:
     - controller_path: /mnt/Eddy/jellyfin-media
       eddy_path: /mnt/jellyfin-media
 
+processing:
+  method: ssh
+  ssh_target: barnabas.lan
+  ssh_user: flan
+  ssh_options: []
+  docker_image: disc-steward-ffmpeg:bookworm
+  docker_state_root: /mnt/data1/docker/disc-steward-ffmpeg
+
+notifications:
+  enabled: true
+  provider: ntfy
+  ntfy_url: https://ntfy.flan.party
+  ntfy_topic: dvd-rips
 preferred_video_profile: universal_h264_aac_srt
 preferred_audio_fallback_codec: aac
 preferred_subtitle_format: srt
@@ -57,6 +70,7 @@ subtitle_policies:
   - preserve_ass_add_srt_fallback
   - manual_review
 minimum_title_duration_seconds: 30
+raw_rip_settle_seconds: 900
 raw_rip_retention_days: 30
 working_file_retention_days: 14
 dry_run: true

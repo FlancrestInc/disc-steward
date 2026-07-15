@@ -160,8 +160,7 @@ def test_create_ffmpeg_processing_jobs_persists_subtitle_plan(tmp_path):
     item = json.loads((folder / "items" / "item_001.process.json").read_text(encoding="utf-8"))
     assert item["subtitle_plan"]["image_subtitles_default"] is True
     assert item["subtitle_plan"]["statuses"] == ["needs_ocr_to_srt", "needs_default_flag_cleanup"]
-    assert item["subtitle_outputs"]
-    assert item["subtitle_outputs"][0]["output_name"].endswith(".srt")
+    assert item["subtitle_outputs"] == []
     assert db.get_subtitle_plan(source_id)["statuses"] == ["needs_ocr_to_srt", "needs_default_flag_cleanup"]
 
 
@@ -177,6 +176,35 @@ def test_extract_text_subtitle_sidecar_does_not_require_ocr_runtime(tmp_path, mo
     assert len(results) == 1
     assert results[0].kind == "text"
     assert (tmp_path / "Movie.sub01.eng.subrip.srt").read_text(encoding="utf-8").startswith("1\n")
+
+
+def test_extract_subtitle_sidecars_can_skip_image_ocr_when_disabled(tmp_path, monkeypatch):
+    source = _source(
+        tmp_path / "movie.mkv",
+        subtitles=[
+            SubtitleStream(index=6, codec="subrip", language="eng"),
+            SubtitleStream(index=7, codec="dvd_subtitle", language="eng"),
+        ],
+    )
+    monkeypatch.setattr(subtitle_extraction, "RapidOCR", None)
+
+    def fake_ffmpeg(command: list[str]) -> None:
+        Path(command[-1]).write_text("1\n00:00:00,000 --> 00:00:01,000\nSubtitle\n\n", encoding="utf-8")
+
+    results = extract_subtitle_sidecars(
+        "ffmpeg",
+        "ffprobe",
+        source,
+        tmp_path,
+        "Movie.mkv",
+        ffmpeg_runner=fake_ffmpeg,
+        convert_image_subtitles_to_srt=False,
+    )
+
+    assert len(results) == 1
+    assert results[0].kind == "text"
+    assert (tmp_path / "Movie.sub01.eng.subrip.srt").exists()
+    assert not (tmp_path / "Movie.sub02.eng.dvd_subtitle.srt").exists()
 
 
 def test_extract_image_subtitle_keeps_blank_ocr_frames_aligned(tmp_path, monkeypatch):
@@ -288,10 +316,8 @@ def test_job_validation_warns_when_subtitle_plan_cannot_confirm_srt(tmp_path):
     output = config.validation_needed_path / f"job_{job_id}" / Path(decision.generated_final_path).name
     output.parent.mkdir(parents=True)
     output.write_bytes(b"output" * 1000)
-    for subtitle in item["subtitle_outputs"]:
-        (output.parent / subtitle["output_name"]).write_text("1\n00:00:00,000 --> 00:00:01,000\nSubtitle\n\n", encoding="utf-8")
 
     summary = validate_job_outputs(db, config, job_id, ffprobe_runner=lambda _path: _ffprobe_output(subtitles=[{"codec_name": "hdmv_pgs_subtitle", "default": 0}]))
 
     assert summary.passed is True
-    assert summary.items[0].subtitle_outputs
+    assert summary.items[0].subtitle_outputs == []

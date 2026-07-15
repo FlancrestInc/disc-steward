@@ -9,6 +9,7 @@ from .config import AppConfig
 from .models import AudioStream, JobValidationSummary, OutputValidationItem, ScannedFile, SubtitleStream, ValidationResult, VideoInfo
 from .scanner import IMAGE_SUBTITLE_CODECS, parse_ffprobe, run_ffprobe
 from .subtitle_planner import validate_subtitle_plan_result
+from .notifications import send_notification
 
 
 VIDEO_OPTIONAL_ROLES = {"audio_only", "subtitle_only"}
@@ -110,6 +111,13 @@ def validate_job_outputs(
         f"Validation {'passed' if passed else 'failed'} for {len(items)} output(s)",
         job_id,
         {"warnings": warnings},
+    )
+    send_notification(
+        config,
+        f"Validation {'passed' if passed else 'failed'}: job {job_id}",
+        f"Validation {'passed' if passed else 'failed'} for job {job_id} with {len(items)} item(s).",
+        priority="default" if passed else "high",
+        tags=["validation", "success"] if passed else ["validation", "warning"],
     )
     return summary
 
