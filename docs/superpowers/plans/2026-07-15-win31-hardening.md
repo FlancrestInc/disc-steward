@@ -12,18 +12,18 @@
 
 ### Task 1: State and accessibility primitives
 
-- [ ] Add `ds-status` and `ds-empty-state` to the core package with semantic variants.
-- [ ] Render the window title as the page’s single H1 and turn user-facing error summaries into alert regions.
-- [ ] Apply shared state classes to existing empty/error output without changing workflow behavior.
+- [x] Add `ds-status` and `ds-empty-state` to the core package with semantic variants.
+- [x] Render the window title as the page’s single H1 and turn user-facing error summaries into alert regions.
+- [x] Apply shared state classes to existing empty/error output without changing workflow behavior.
 
 ### Task 2: Visual regression coverage
 
-- [ ] Add a browser screenshot comparator with checked-in desktop and narrow baselines.
-- [ ] Update the baseline only through an explicit environment flag.
-- [ ] Exercise standard and reduced-motion browser contexts.
+- [x] Add a browser screenshot comparator with checked-in desktop and narrow baselines.
+- [x] Update the baseline only through an explicit environment flag.
+- [x] Exercise standard and reduced-motion browser contexts.
 
 ### Task 3: Distribution and test-suite handoff
 
-- [ ] Record vendored core/motion artifact provenance and refresh instructions in Disc Steward.
-- [ ] Run Style package checks plus Disc Steward focused/browser/full-suite commands; diagnose rather than claim a full pass if the runner does not complete.
-- [ ] Do not publish or push without separate user authorization.
+- [x] Record vendored core/motion artifact provenance and refresh instructions in Disc Steward.
+- [x] Run Style package checks plus Disc Steward focused/browser/full-suite commands; diagnose rather than claim a full pass if the runner does not complete.
+- [x] User authorized publishing and pushing after the checks completed.

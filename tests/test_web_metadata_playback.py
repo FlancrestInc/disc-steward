@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import threading
 from pathlib import Path
 from urllib.error import HTTPError
@@ -59,8 +60,8 @@ def test_page_activates_win31_theme_and_maps_legacy_tokens_to_semantic_tokens():
 def test_page_wraps_content_in_a_win31_window_shell():
     html = web.page("Test", "<p>hello</p>")
 
-    assert '<main><section class="ds-window app-window">' in html
-    assert '<div class="ds-titlebar"><span>Test</span></div>' in html
+    assert '<main><section class="ds-window app-window ds-motion-enter-window">' in html
+    assert '<div class="ds-titlebar"><h1 class="ds-titlebar__title">Test</h1></div>' in html
     assert '<div class="ds-window__body"><p>hello</p></div>' in html
 
 
@@ -167,6 +168,21 @@ def test_static_design_system_stylesheet_is_served_and_unknown_asset_is_not_foun
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_vendored_win31_artifacts_have_traceable_provenance():
+    provenance = json.loads((web.STATIC_DIR / "win31-artifacts.json").read_text())
+
+    assert provenance["source_repository"] == "https://github.com/FlancrestInc/style"
+    assert provenance["source_revision"] == "319bb11dde1c31881f8a4f60358112465070f0b5"
+    assert provenance["artifacts"]["win31-core.css"]["package"] == "@flancrest/win31-core"
+    assert provenance["artifacts"]["win31-core.css"]["version"] == "0.1.0"
+    assert provenance["artifacts"]["win31-motion.css"]["package"] == "@flancrest/win31-motion"
+    assert provenance["artifacts"]["win31-motion.css"]["version"] == "0.1.0"
+
+    for filename, artifact in provenance["artifacts"].items():
+        digest = hashlib.sha256((web.STATIC_DIR / filename).read_bytes()).hexdigest()
+        assert artifact["sha256"] == digest
 
 
 def _config(tmp_path: Path) -> AppConfig:

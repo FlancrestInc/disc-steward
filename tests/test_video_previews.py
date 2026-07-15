@@ -244,4 +244,4 @@ def test_render_job_list_shows_preview_queue_panel_and_error(tmp_path):
     assert "failed" in html
     assert "Source file not found" in html
     assert f"/jobs/{job_id}" in html
-    assert '<details class="dashboard-lane preview-queue-panel">' in html
+    assert '<details class="dashboard-lane preview-queue-panel ds-motion-disclosure">' in html
