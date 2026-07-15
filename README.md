@@ -317,6 +317,13 @@ Transfer conflicts usually mean the final Eddy path already exists, incoming sta
 python -m pytest -q
 ```
 
+Browser coverage uses the same `test` extra. Install Chromium once, then run the browser suite separately:
+
+```bash
+uv run playwright install chromium
+uv run pytest tests/browser -q
+```
+
 The test suite covers ffprobe JSON parsing, classification rules, repeated scan idempotency, subtitle risk detection, subtitle plan generation, subtitle plan validation, movie/extra/show/special path generation, filename sanitization, metadata ID filename formatting, work-order JSON generation, review validation, ffmpeg output matching, profile validation failures, audit logging, local Eddy transfer, conflict detection, verification behavior, Unicode/Japanese handling, cleanup planning/holds/dry-run behavior, LLM packet truncation and inert suggestions, status summaries, and Jellyfin refresh warning handling.
 
 ## Future Work

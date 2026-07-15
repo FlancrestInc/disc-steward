@@ -35,9 +35,12 @@
 ### Task 3: Browser coverage
 
 **Files:**
-- Create or modify: `tests/browser/review-ui.spec.*` if Playwright is available in Disc Steward; otherwise document the deferred setup in this plan.
-- [ ] Add an accessibility scan and desktop/narrow screenshot check for a rendered review page. Deferred: Disc Steward has no Playwright dependency (`uv run python -c 'import playwright'` exits 1); add this with the dedicated browser-test setup phase instead of expanding this migration.
-- [x] Run the checks or record the unavailable dependency precisely without changing runtime dependencies.
+- Modify: `pyproject.toml`, `uv.lock`
+- Create: `tests/browser/test_review_ui.py`
+- [x] Write browser tests that start the real review handler, assert semantic keyboard access and design-system controls, and capture desktop/narrow screenshots into ignored test output.
+- [x] Run the test and confirm it fails because the pytest `page` fixture is unavailable.
+- [x] Add `pytest-playwright` to the test extra and install Chromium with the Playwright CLI; do not add any browser dependency to runtime requirements.
+- [x] Run the browser tests and retain screenshots only as test output, not versioned source assets.
 
 ### Task 4: Verify and commit
 
