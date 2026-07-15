@@ -4,7 +4,7 @@
 
 **Architecture:** A vendored, built CSS artifact is served from a fixed `/static/` route. `page()` links that file before the existing inline style block, so the current application styles continue to win until the later token/primitives migration. The asset URL includes its modification timestamp for cache invalidation; the route is deliberately allowlisted rather than a general filesystem server.
 
-**Tech Stack:** Python 3.10 standard-library HTTP server, Pytest, compiled CSS from `@flancrest/win31-core`.
+**Tech Stack:** Python 3.10 standard-library HTTP server, Pytest, compiled CSS from `@flancrestinc/win31-core`.
 
 ---
 
@@ -37,6 +37,6 @@
 - Create: `disc_steward/static/win31-core.css`
 - Modify: `README.md`
 
-- [x] Copy the built `@flancrest/win31-core` artifact once as a versioned vendor asset; preserve its generated-source header.
+- [x] Copy the built `@flancrestinc/win31-core` artifact once as a versioned vendor asset; preserve its generated-source header.
 - [x] Document that the asset is a temporary packaged artifact, refreshed from a released/packed Style package rather than hand-edited.
 - [x] Verify the stylesheet is non-empty, tests pass, and `git diff --check` is clean.

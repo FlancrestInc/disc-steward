@@ -6,7 +6,7 @@
 
 **Architecture:** Keep Disc Steward's generated HTML and its inline application CSS. Add `ds-*` hooks only to semantic native elements; the vendored core stylesheet owns the shared control appearance while app CSS remains responsible for the review workflow's layout. Test the rendered HTML contracts and verify the review page at desktop and narrow widths.
 
-**Tech Stack:** Python 3.10, standard-library HTTP server, Pytest, vendored `@flancrest/win31-core` CSS, Playwright where available.
+**Tech Stack:** Python 3.10, standard-library HTTP server, Pytest, vendored `@flancrestinc/win31-core` CSS, Playwright where available.
 
 ---
 

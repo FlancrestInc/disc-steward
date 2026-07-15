@@ -174,10 +174,10 @@ def test_vendored_win31_artifacts_have_traceable_provenance():
     provenance = json.loads((web.STATIC_DIR / "win31-artifacts.json").read_text())
 
     assert provenance["source_repository"] == "https://github.com/FlancrestInc/style"
-    assert provenance["source_revision"] == "319bb11dde1c31881f8a4f60358112465070f0b5"
-    assert provenance["artifacts"]["win31-core.css"]["package"] == "@flancrest/win31-core"
+    assert provenance["source_revision"] == "69320e60af8f8d09414815ca0ec2b4a7bfb2d95a"
+    assert provenance["artifacts"]["win31-core.css"]["package"] == "@flancrestinc/win31-core"
     assert provenance["artifacts"]["win31-core.css"]["version"] == "0.1.0"
-    assert provenance["artifacts"]["win31-motion.css"]["package"] == "@flancrest/win31-motion"
+    assert provenance["artifacts"]["win31-motion.css"]["package"] == "@flancrestinc/win31-motion"
     assert provenance["artifacts"]["win31-motion.css"]["version"] == "0.1.0"
 
     for filename, artifact in provenance["artifacts"].items():

@@ -6,7 +6,7 @@
 
 **Architecture:** Preserve all existing input names, values, fieldsets, and form actions. Add `ds-field` to textual labels and `ds-control` to their controls; retain native checkbox markup so dense include/exclude decisions remain compact and familiar.
 
-**Tech Stack:** Python HTML rendering, Pytest, pytest-playwright, vendored `@flancrest/win31-core` CSS.
+**Tech Stack:** Python HTML rendering, Pytest, pytest-playwright, vendored `@flancrestinc/win31-core` CSS.
 
 ---
 

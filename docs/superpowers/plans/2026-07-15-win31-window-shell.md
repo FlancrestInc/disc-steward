@@ -6,7 +6,7 @@
 
 **Architecture:** `page()` keeps the existing document title, route behavior, and `main` landmark, but nests the generated page body inside `ds-window`, `ds-titlebar`, and `ds-window__body`. Existing review sections receive `ds-panel` hooks without changing their content or layout-specific classes.
 
-**Tech Stack:** Python 3.10 HTML rendering, Pytest, pytest-playwright, vendored `@flancrest/win31-core` CSS.
+**Tech Stack:** Python 3.10 HTML rendering, Pytest, pytest-playwright, vendored `@flancrestinc/win31-core` CSS.
 
 ---
 

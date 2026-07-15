@@ -109,7 +109,7 @@ Run:
 python -m disc_steward serve --config config.yaml
 ```
 
-The review UI links versioned, vendored `static/win31-core.css` and `static/win31-motion.css` artifacts from the Style design-system packages before its existing inline stylesheet. That inline stylesheet remains the visual fallback during the incremental migration. Do not hand-edit these files: refresh them from built and validated package artifacts when upgrading the design-system version, then update `disc_steward/static/win31-artifacts.json` with the Style Git revision, package versions, source paths, and SHA-256 hashes. The provenance test prevents an unrecorded artifact change.
+The review UI links versioned, vendored `static/win31-core.css` and `static/win31-motion.css` artifacts from the `@flancrestinc/win31-*` Style design-system packages before its existing inline stylesheet. That inline stylesheet remains the visual fallback during the incremental migration. Do not hand-edit these files: refresh them from built and validated package artifacts when upgrading the design-system version, then update `disc_steward/static/win31-artifacts.json` with the Style Git revision, package versions, source paths, and SHA-256 hashes. The provenance test prevents an unrecorded artifact change.
 
 The job list shows each scanned disc folder, status, file count, likely main feature, probable extras, subtitle issues, transcode-risk issues, and review status. Open a job to review all ripped files grouped as main feature candidates, possible episodes, extras, trailers/promos, featurettes/documentaries, deleted scenes, menu/logo/bumper candidates, and manual review.
 

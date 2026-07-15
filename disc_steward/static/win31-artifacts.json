@@ -1,15 +1,15 @@
 {
   "source_repository": "https://github.com/FlancrestInc/style",
-  "source_revision": "319bb11dde1c31881f8a4f60358112465070f0b5",
+  "source_revision": "69320e60af8f8d09414815ca0ec2b4a7bfb2d95a",
   "artifacts": {
     "win31-core.css": {
-      "package": "@flancrest/win31-core",
+      "package": "@flancrestinc/win31-core",
       "version": "0.1.0",
       "source_path": "packages/core/dist/index.css",
-      "sha256": "14b3236831adbd09a8da0d3e8ec9d3561ffc7401aef03a0f89f9d9084b8ada2a"
+      "sha256": "d20e11cce56e409b4754d9ff1468134c03f604bce216071d3d635d5c30fcd8db"
     },
     "win31-motion.css": {
-      "package": "@flancrest/win31-motion",
+      "package": "@flancrestinc/win31-motion",
       "version": "0.1.0",
       "source_path": "packages/motion/dist/motion.css",
       "sha256": "118c939a2cbd669dbbbd850d29fdfe76853b93e0d1e91a9d3916a42f77955089"

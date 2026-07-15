@@ -6,7 +6,7 @@
 
 **Architecture:** Reuse the existing core `ds-table-wrap` overflow primitive. Disc Steward wraps each operational `ds-table` in a labelled, keyboard-focusable scroll region; table semantics and all columns stay intact.
 
-**Tech Stack:** CSS, Python HTML rendering, Pytest, pytest-playwright, vendored `@flancrest/win31-core` CSS.
+**Tech Stack:** CSS, Python HTML rendering, Pytest, pytest-playwright, vendored `@flancrestinc/win31-core` CSS.
 
 ---
 
