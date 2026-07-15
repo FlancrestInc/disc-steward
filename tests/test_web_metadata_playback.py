@@ -41,6 +41,26 @@ def test_page_activates_win31_theme_and_maps_legacy_tokens_to_semantic_tokens():
     assert "--font-body: var(--ds-font-ui);" in html
 
 
+def test_page_wraps_content_in_a_win31_window_shell():
+    html = web.page("Test", "<p>hello</p>")
+
+    assert '<main><section class="ds-window app-window">' in html
+    assert '<div class="ds-titlebar"><span>Test</span></div>' in html
+    assert '<div class="ds-window__body"><p>hello</p></div>' in html
+
+
+def test_review_surfaces_adopt_win31_panel_primitives(tmp_path):
+    config = _config(tmp_path)
+    db, job_id, _source_id, _media = _job_with_source(tmp_path, config)
+
+    html = web.render_job_review(db, config, job_id)
+
+    assert 'class="dashboard-summary job-review-summary review-header ds-panel"' in html
+    assert 'class="primary-metadata ds-panel"' in html
+    assert 'class="file-card ds-panel"' in html
+    assert 'class="ops ds-panel"' in web.render_phase4_sections(db, config, job_id)
+
+
 def test_review_markup_adopts_win31_control_primitives(tmp_path):
     config = _config(tmp_path)
     db, job_id, _source_id, _media = _job_with_source(tmp_path, config)

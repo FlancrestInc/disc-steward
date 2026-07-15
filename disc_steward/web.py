@@ -984,7 +984,7 @@ def _render_job_review_summary_strip(
             progress_bits.append("<span class='pipeline-arrow'>→</span>")
     progress_html = "".join(progress_bits)
     return f"""
-    <section class="dashboard-summary job-review-summary review-header">
+    <section class="dashboard-summary job-review-summary review-header ds-panel">
       <div class="dashboard-summary-header">
         <div>
           <div class="job-summary-topline">
@@ -1147,7 +1147,7 @@ def render_job_fields(config: AppConfig, review: JobReviewMetadata) -> str:
     confidence_html = f'<input type="hidden" name="confidence" value="{escape(str(review.confidence))}">' if review.confidence is not None else ''
     return f"""
     <section class="review-stack">
-      <fieldset class="primary-metadata">
+      <fieldset class="primary-metadata ds-panel">
         <legend>Primary metadata</legend>
         <p class="wide muted">Set the title, year, content type, and library root first. Everything else lives in the advanced section below.</p>
         <label class="ds-field">Title <input class="ds-control" name="title" value="{escape(review.title)}"></label>
@@ -1341,7 +1341,7 @@ def render_file_card(config: AppConfig, job_id: int, row: dict, decision: FileRe
     )
     destination_preview = final_path if decision.include_in_work_order else "Skipped / do not process."
     return f"""
-    <article class="file-card" data-source-file-id="{source_id}">
+    <article class="file-card ds-panel" data-source-file-id="{source_id}">
       <div class="file-card-header">
         <div>
           <h3>{escape(row['filename'])}</h3>
@@ -1634,7 +1634,7 @@ def _render_automation_queue_table(db: Database, job_id: int) -> str:
     return f"""
     <details class="automation-queue-panel">
       <summary>Automation queue <span class="muted">({len(automation_jobs)} active)</span></summary>
-      <section class="ops">
+      <section class="ops ds-panel">
         <table class="ds-table" data-density="compact">
           <thead><tr><th>Job</th><th>State</th><th>Attempts</th><th>Queued</th><th>Started</th><th>Finished</th><th>Note</th></tr></thead>
           <tbody>{''.join(rows_html)}</tbody>
@@ -1654,7 +1654,7 @@ def render_phase3_sections(db: Database, config: AppConfig, job_id: int) -> str:
     return f"""
     <details class="advanced-panel">
       <summary>Processing and transfer</summary>
-      <section class="ops">
+      <section class="ops ds-panel">
         <p>Automated flow status: <strong>{escape(pipeline_status)}</strong></p>
         <p class="muted">If something fails, fix the issue and press resume to continue from the last successful step.</p>
         <form method="post" action="/jobs/{job_id}/resume-flow" class="inline-form">
@@ -1682,7 +1682,7 @@ def render_phase4_sections(db: Database, config: AppConfig, job_id: int) -> str:
     return f"""
     <details class="advanced-panel">
       <summary>Metadata automation and cleanup</summary>
-      <section class="ops">
+      <section class="ops ds-panel">
         <p>Metadata providers: <strong>{'enabled' if config.metadata.enabled else 'disabled'}</strong> · LLM/Hermes: <strong>{'enabled' if config.llm.enabled else 'disabled'}</strong> · Cleanup: <strong>{'enabled' if config.cleanup.enabled else 'disabled'}</strong> ({'dry-run' if config.cleanup.dry_run else 'live'})</p>
         <form method="post" action="/jobs/{job_id}/llm-suggestions" class="inline-form">
           <button class="ds-button" {'disabled' if not config.llm.enabled else ''}>Request LLM suggestions</button>
@@ -1801,7 +1801,7 @@ def render_preview_queue_panel(db: Database, config: AppConfig) -> str:
     return f"""
     <details class="dashboard-lane preview-queue-panel">
       <summary>Preview queue <span class="muted">({active_total} active · {counts['queued']} queued · {counts['running']} running · {counts['failed']} failed)</span></summary>
-      <section class="ops">
+      <section class="ops ds-panel">
         <table class="ds-table" data-density="compact">
           <thead><tr><th>Job</th><th>File</th><th>State</th><th>Attempts</th><th>Queued</th><th>Started</th><th>Note</th></tr></thead>
           <tbody>{''.join(row_html)}</tbody>
@@ -1954,7 +1954,7 @@ def render_validation_section(job_id: int, summary: dict | None) -> str:
         </table>
         """
     return f"""
-    <section class="ops">
+    <section class="ops ds-panel">
       <h2>Processing Validation</h2>
       {body}
       <form method="post" action="/jobs/{job_id}/validate">
@@ -2014,7 +2014,7 @@ def render_transfer_section(job_id: int, validation: dict | None, summary: dict 
         </table>
         """
     return f"""
-    <section class="ops">
+    <section class="ops ds-panel">
       <h2>Eddy Transfer and Import</h2>
       <p>Readiness: <strong>{'ready' if ready else 'not ready'}</strong></p>
       {body}
@@ -2449,7 +2449,7 @@ def page(title: str, body: str) -> str:
         code {{ word-break: break-all; }}
       </style>
     </head>
-    <body data-ds-theme="win31"><main>{body}</main>
+    <body data-ds-theme="win31"><main><section class="ds-window app-window"><div class="ds-titlebar"><span>{escape(title)}</span></div><div class="ds-window__body">{body}</div></section></main>
       <script>
       (() => {{
         window.updateDestinationPreviews = () => {{}};

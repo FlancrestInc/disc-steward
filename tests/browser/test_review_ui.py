@@ -58,6 +58,7 @@ def test_review_page_supports_keyboard_controls_and_captures_viewports(page: Pag
     assert page.locator(".ds-field .ds-control").count() >= 4
     assert page.title().startswith("Review")
     assert page.locator("main").is_visible()
+    assert page.locator(".ds-window .ds-titlebar").inner_text() == page.title()
 
     desktop = tmp_path / "review-desktop.png"
     page.screenshot(path=str(desktop), full_page=True)
