@@ -33,6 +33,7 @@ from .work_orders import create_ffmpeg_processing_jobs, create_fileflows_work_or
 LOGO_PATH = Path(__file__).resolve().parent.parent / "disc-steward-logo.png"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DESIGN_SYSTEM_STYLESHEET = STATIC_DIR / "win31-core.css"
+MOTION_STYLESHEET = STATIC_DIR / "win31-motion.css"
 
 
 def _favicon_href() -> str:
@@ -45,6 +46,12 @@ def _design_system_stylesheet_href() -> str:
     if not DESIGN_SYSTEM_STYLESHEET.exists():
         return "/static/win31-core.css"
     return f"/static/win31-core.css?v={DESIGN_SYSTEM_STYLESHEET.stat().st_mtime_ns}"
+
+
+def _motion_stylesheet_href() -> str:
+    if not MOTION_STYLESHEET.exists():
+        return "/static/win31-motion.css"
+    return f"/static/win31-motion.css?v={MOTION_STYLESHEET.stat().st_mtime_ns}"
 
 ROLE_CHOICES = [
     "main_feature",
@@ -107,6 +114,9 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/static/win31-core.css":
             self._send_design_system_stylesheet()
+            return
+        if path == "/static/win31-motion.css":
+            self._send_motion_stylesheet()
             return
         if path.startswith("/media/"):
             source_id, variant = _source_id_and_variant_from_media_path(path)
@@ -209,6 +219,18 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         data = DESIGN_SYSTEM_STYLESHEET.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/css; charset=utf-8")
+        self.send_header("Cache-Control", "public, max-age=3600")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_motion_stylesheet(self) -> None:
+        if not MOTION_STYLESHEET.exists():
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        data = MOTION_STYLESHEET.read_bytes()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/css; charset=utf-8")
         self.send_header("Cache-Control", "public, max-age=3600")
@@ -791,7 +813,7 @@ def _render_title_discovery_panel(review: JobReviewMetadata) -> str:
         <span class="muted">Suggested title: {title} · confidence {confidence_text}</span>
       </div>
       <p class="wide muted">Review the prefilled metadata below, correct anything that looks off, then use <strong>Confirm and queue ffmpeg</strong> to continue.</p>
-      <details>
+      <details class="ds-motion-disclosure">
         <summary>Evidence</summary>
         <ul>{''.join(signal_bits) or '<li>No structured evidence stored.</li>'}</ul>
         {f"<p class='errors'>Warnings: {'; '.join(warning_bits)}</p>" if warning_bits else ''}
@@ -858,7 +880,7 @@ def _render_review_lane(
         cards_html = '<p class="muted">No files in this group.</p>'
     open_attr = "open" if key == "main" or unresolved > 0 else ""
     return f"""
-    <details class="dashboard-lane dashboard-lane-collapsed" {open_attr}>
+    <details class="dashboard-lane dashboard-lane-collapsed ds-motion-disclosure" {open_attr}>
       <summary>
         <span>{escape(label)}</span>
         <span class="lane-badges">
@@ -1155,7 +1177,7 @@ def render_job_fields(config: AppConfig, review: JobReviewMetadata) -> str:
         <label class="ds-field">Content type {select("content_type", CONTENT_TYPES, review.content_type)}</label>
         <label class="ds-field">Library root {select("library_root", list(config.eddy_library_roots.keys()) or LIBRARY_ROOTS, review.library_root)}</label>
       </fieldset>
-      <details class="advanced-panel">
+      <details class="advanced-panel ds-motion-disclosure">
         <summary>Advanced metadata</summary>
         <div class="advanced-grid">
           <label>Original title <input name="original_title" value="{escape(review.original_title or '')}"></label>
@@ -1208,7 +1230,7 @@ def render_metadata_lookup_strip(db: Database, config: AppConfig, job_id: int, t
     disabled = "disabled" if not metadata_status["enabled"] else ""
     expanded = "open" if not (title or "").strip() else ""
     return f"""
-    <details class="lookup-strip advanced-card" {expanded}>
+    <details class="lookup-strip advanced-card ds-motion-disclosure" {expanded}>
       <summary>
         <strong>Metadata lookup</strong>
         <span class="muted">{'enabled' if metadata_status['enabled'] else 'disabled'} · {' · '.join(provider_bits)}</span>
@@ -1373,7 +1395,7 @@ def render_file_card(config: AppConfig, job_id: int, row: dict, decision: FileRe
         {controller_final_path}
       </section>
       {attention_html}
-      <details class="advanced-panel file-advanced">
+      <details class="advanced-panel file-advanced ds-motion-disclosure">
         <summary>Advanced file details</summary>
         <div class="advanced-grid">
           <p class="wide muted"><strong>Controller path:</strong> <code>{escape(row['path'])}</code></p>
@@ -1632,7 +1654,7 @@ def _render_automation_queue_table(db: Database, job_id: int) -> str:
             "</tr>"
         )
     return f"""
-    <details class="automation-queue-panel">
+    <details class="automation-queue-panel ds-motion-disclosure">
       <summary>Automation queue <span class="muted">({len(automation_jobs)} active)</span></summary>
       <section class="ops ds-panel">
         <table class="ds-table" data-density="compact">
@@ -1652,7 +1674,7 @@ def render_phase3_sections(db: Database, config: AppConfig, job_id: int) -> str:
     pipeline_status = _pipeline_status_text(db, job_id)
     automation_queue_html = _render_automation_queue_table(db, job_id)
     return f"""
-    <details class="advanced-panel">
+    <details class="advanced-panel ds-motion-disclosure">
       <summary>Processing and transfer</summary>
       <section class="ops ds-panel">
         <p>Automated flow status: <strong>{escape(pipeline_status)}</strong></p>
@@ -1680,7 +1702,7 @@ def render_phase4_sections(db: Database, config: AppConfig, job_id: int) -> str:
         for item in db.list_cleanup_eligibility(job_id)
     )
     return f"""
-    <details class="advanced-panel">
+    <details class="advanced-panel ds-motion-disclosure">
       <summary>Metadata automation and cleanup</summary>
       <section class="ops ds-panel">
         <p>Metadata providers: <strong>{'enabled' if config.metadata.enabled else 'disabled'}</strong> · LLM/Hermes: <strong>{'enabled' if config.llm.enabled else 'disabled'}</strong> · Cleanup: <strong>{'enabled' if config.cleanup.enabled else 'disabled'}</strong> ({'dry-run' if config.cleanup.dry_run else 'live'})</p>
@@ -1799,7 +1821,7 @@ def render_preview_queue_panel(db: Database, config: AppConfig) -> str:
             f"<tr><td><a href='/jobs/{row['job_id']}'>{job_label}</a></td><td>{source_label}</td><td><span class='pill pill-{state}'>{escape(state)}</span></td><td>{int(row.get('attempts') or 0)}</td><td>{escape(str(row.get('queued_at') or ''))}</td><td>{escape(str(row.get('started_at') or ''))}</td><td>{escape(note)}</td></tr>"
         )
     return f"""
-    <details class="dashboard-lane preview-queue-panel">
+    <details class="dashboard-lane preview-queue-panel ds-motion-disclosure">
       <summary>Preview queue <span class="muted">({active_total} active · {counts['queued']} queued · {counts['running']} running · {counts['failed']} failed)</span></summary>
       <section class="ops ds-panel">
         <table class="ds-table" data-density="compact">
@@ -1838,7 +1860,7 @@ def render_dashboard_lane(title: str, rows: list[dict], *, collapsed: bool = Fal
     """
     if collapsed:
         return f"""
-        <details class="dashboard-lane dashboard-lane-collapsed">
+        <details class="dashboard-lane dashboard-lane-collapsed ds-motion-disclosure">
           <summary>{escape(title)} <span class="muted">({len(rows)} job{'s' if len(rows) != 1 else ''})</span></summary>
           {panel}
         </details>
@@ -1896,7 +1918,7 @@ def render_ignored_jobs_lane(rows: list[dict]) -> str:
     if not cards:
         cards = '<p class="muted">No deleted jobs have been ignored.</p>'
     return f"""
-    <details class="dashboard-lane dashboard-lane-collapsed">
+    <details class="dashboard-lane dashboard-lane-collapsed ds-motion-disclosure">
       <summary>
         <span>Deleted / ignored</span>
         <span class="lane-badges"><span>{len(rows)} job{'s' if len(rows) != 1 else ''}</span></span>
@@ -2105,6 +2127,7 @@ def page(title: str, body: str) -> str:
       <title>{escape(title)}</title>
       <link rel="icon" type="image/png" href="{_favicon_href()}">
       <link rel="stylesheet" href="{_design_system_stylesheet_href()}">
+      <link rel="stylesheet" href="{_motion_stylesheet_href()}">
       <style>
         body[data-ds-theme="win31"] {{
           color-scheme: light;
@@ -2449,7 +2472,7 @@ def page(title: str, body: str) -> str:
         code {{ word-break: break-all; }}
       </style>
     </head>
-    <body data-ds-theme="win31"><main><section class="ds-window app-window"><div class="ds-titlebar"><span>{escape(title)}</span></div><div class="ds-window__body">{body}</div></section></main>
+    <body data-ds-theme="win31"><main><section class="ds-window app-window ds-motion-enter-window"><div class="ds-titlebar"><span>{escape(title)}</span></div><div class="ds-window__body">{body}</div></section></main>
       <script>
       (() => {{
         window.updateDestinationPreviews = () => {{}};

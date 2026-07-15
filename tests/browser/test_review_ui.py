@@ -59,6 +59,7 @@ def test_review_page_supports_keyboard_controls_and_captures_viewports(page: Pag
     assert page.title().startswith("Review")
     assert page.locator("main").is_visible()
     assert page.locator(".ds-window .ds-titlebar").inner_text() == page.title()
+    assert page.locator(".ds-window.ds-motion-enter-window").count() == 1
 
     desktop = tmp_path / "review-desktop.png"
     page.screenshot(path=str(desktop), full_page=True)
@@ -68,3 +69,7 @@ def test_review_page_supports_keyboard_controls_and_captures_viewports(page: Pag
     narrow = tmp_path / "review-narrow.png"
     page.screenshot(path=str(narrow), full_page=True)
     assert narrow.stat().st_size > 0
+
+    page.emulate_media(reduced_motion="reduce")
+    page.reload()
+    assert page.locator(".ds-window").evaluate("element => getComputedStyle(element).animationName") == "none"

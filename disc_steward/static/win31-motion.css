@@ -1,0 +1,63 @@
+/* Generated from src/motion.css; do not edit. */
+@keyframes ds-window-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ds-window-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.99);
+  }
+}
+
+@keyframes ds-overlay-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-0.25rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ds-motion-enter-window {
+  animation: ds-window-enter var(--ds-motion-duration-window) var(--ds-motion-ease-mechanical) both;
+}
+
+.ds-motion-exit-window {
+  animation: ds-window-exit var(--ds-motion-duration-standard) var(--ds-motion-ease-mechanical) both;
+}
+
+.ds-motion-enter-menu,
+.ds-motion-enter-toast {
+  animation: ds-overlay-enter var(--ds-motion-duration-fast) var(--ds-motion-ease-mechanical) both;
+}
+
+.ds-motion-disclosure[open] > :not(summary) {
+  animation: ds-overlay-enter var(--ds-motion-duration-fast) var(--ds-motion-ease-mechanical) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-motion-enter-window,
+  .ds-motion-exit-window,
+  .ds-motion-enter-menu,
+  .ds-motion-enter-toast,
+  .ds-motion-disclosure[open] > :not(summary) {
+    animation: none;
+  }
+}

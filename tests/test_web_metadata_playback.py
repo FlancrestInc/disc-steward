@@ -30,6 +30,21 @@ def test_page_links_versioned_design_system_stylesheet_before_inline_css():
     assert stylesheet_index < inline_css_index
 
 
+def test_page_links_versioned_motion_stylesheet_after_core_css():
+    html = web.page("Test", "<p>hello</p>")
+
+    core_index = html.index('rel="stylesheet" href="/static/win31-core.css?v=')
+    motion_index = html.index('rel="stylesheet" href="/static/win31-motion.css?v=')
+    assert core_index < motion_index < html.index("<style>")
+
+
+def test_page_uses_win31_motion_hooks(tmp_path):
+    html = web.render_job_fields(_config(tmp_path), web.JobReviewMetadata(job_id=1))
+
+    assert 'advanced-panel ds-motion-disclosure' in html
+    assert 'ds-motion-enter-window' in web.page("Test", html)
+
+
 def test_page_activates_win31_theme_and_maps_legacy_tokens_to_semantic_tokens():
     html = web.page("Test", "<p>hello</p>")
 
@@ -98,6 +113,10 @@ def test_static_design_system_stylesheet_is_served_and_unknown_asset_is_not_foun
             assert response.status == 200
             assert response.headers["Content-Type"].startswith("text/css")
             assert response.read().startswith(b"/* Generated from src/index.css")
+        with urlopen(f"{base_url}/static/win31-motion.css", timeout=5) as response:
+            assert response.status == 200
+            assert response.headers["Content-Type"].startswith("text/css")
+            assert response.read().startswith(b"/* Generated from src/motion.css")
         try:
             urlopen(f"{base_url}/static/not-a-real-asset.css", timeout=5)
         except HTTPError as error:
