@@ -1378,14 +1378,14 @@ def render_file_card(config: AppConfig, job_id: int, row: dict, decision: FileRe
         {render_media_review_controls(config, job_id, row)}
         <div class="file-fields file-fields-primary">
           <label><input type="checkbox" name="{prefix}include" {"checked" if decision.include_in_work_order else ""}> Include in processing</label>
-          <label>Role {select(prefix + "role", ROLE_CHOICES, decision.role, blank=True)}</label>
-          <label>Content type {select(prefix + "content_type", CONTENT_TYPES, decision.content_type)}</label>
-          <label>Extra type <input name="{prefix}extra_type" value="{escape(decision.extra_type or '')}"></label>
-          <label>Display name <input name="{prefix}final_display_name" value="{escape(decision.final_display_name or '')}"></label>
-          <label>Final filename <input name="{prefix}final_filename" value="{escape(decision.final_filename or '')}"></label>
-          <label>Season <input name="{prefix}season_number" value="{escape(str(decision.season_number if decision.season_number is not None else ''))}" inputmode="numeric"></label>
-          <label>Episode <input name="{prefix}episode_number" value="{escape(str(decision.episode_number if decision.episode_number is not None else ''))}" inputmode="numeric"></label>
-          <label>Sort order <input name="{prefix}sort_order" value="{escape(str(decision.sort_order if decision.sort_order is not None else ''))}" inputmode="numeric"></label>
+          <label class="ds-field">Role {select(prefix + "role", ROLE_CHOICES, decision.role, blank=True)}</label>
+          <label class="ds-field">Content type {select(prefix + "content_type", CONTENT_TYPES, decision.content_type)}</label>
+          <label class="ds-field">Extra type <input class="ds-control" name="{prefix}extra_type" value="{escape(decision.extra_type or '')}"></label>
+          <label class="ds-field">Display name <input class="ds-control" name="{prefix}final_display_name" value="{escape(decision.final_display_name or '')}"></label>
+          <label class="ds-field">Final filename <input class="ds-control" name="{prefix}final_filename" value="{escape(decision.final_filename or '')}"></label>
+          <label class="ds-field">Season <input class="ds-control" name="{prefix}season_number" value="{escape(str(decision.season_number if decision.season_number is not None else ''))}" inputmode="numeric"></label>
+          <label class="ds-field">Episode <input class="ds-control" name="{prefix}episode_number" value="{escape(str(decision.episode_number if decision.episode_number is not None else ''))}" inputmode="numeric"></label>
+          <label class="ds-field">Sort order <input class="ds-control" name="{prefix}sort_order" value="{escape(str(decision.sort_order if decision.sort_order is not None else ''))}" inputmode="numeric"></label>
         </div>
       </div>
       <section class="destination-preview">
@@ -1415,18 +1415,18 @@ def render_file_card(config: AppConfig, job_id: int, row: dict, decision: FileRe
           <p class="wide"><strong>Subtitle plan:</strong> {escape(', '.join(subtitle_plan.statuses))}</p>
           {"<p class='errors wide'>" + escape('; '.join(subtitle_plan.warnings)) + "</p>" if subtitle_plan.warnings else ""}
           <div class="file-fields wide file-fields-advanced">
-            <label>Original title <input name="{prefix}original_title" value="{escape(decision.original_title or '')}"></label>
-            <label>Translated title <input name="{prefix}translated_title" value="{escape(decision.translated_title or '')}"></label>
-            <label>Romanized title <input name="{prefix}romanized_title" value="{escape(decision.romanized_title or '')}"></label>
-            <label>Encoding profile {select(prefix + "encoding_profile", config.encoding_profiles, decision.encoding_profile)}</label>
-            <label>Subtitle policy {select(prefix + "subtitle_policy", config.subtitle_policies, decision.subtitle_policy)}</label>
-            <label>IMDb ID <input name="{prefix}imdb_id" value="{escape(decision.imdb_id or '')}"></label>
-            <label>TMDb ID <input name="{prefix}tmdb_id" value="{escape(decision.tmdb_id or '')}"></label>
-            <label>TVDb ID <input name="{prefix}tvdb_id" value="{escape(decision.tvdb_id or '')}"></label>
-            <label>AniDB ID <input name="{prefix}anidb_id" value="{escape(decision.anidb_id or '')}"></label>
-            <label>AniList ID <input name="{prefix}anilist_id" value="{escape(decision.anilist_id or '')}"></label>
-            <label>MAL ID <input name="{prefix}mal_id" value="{escape(decision.mal_id or '')}"></label>
-            <label class="wide">Notes <textarea name="{prefix}notes">{escape(decision.notes or '')}</textarea></label>
+            <label class="ds-field">Original title <input class="ds-control" name="{prefix}original_title" value="{escape(decision.original_title or '')}"></label>
+            <label class="ds-field">Translated title <input class="ds-control" name="{prefix}translated_title" value="{escape(decision.translated_title or '')}"></label>
+            <label class="ds-field">Romanized title <input class="ds-control" name="{prefix}romanized_title" value="{escape(decision.romanized_title or '')}"></label>
+            <label class="ds-field">Encoding profile {select(prefix + "encoding_profile", config.encoding_profiles, decision.encoding_profile)}</label>
+            <label class="ds-field">Subtitle policy {select(prefix + "subtitle_policy", config.subtitle_policies, decision.subtitle_policy)}</label>
+            <label class="ds-field">IMDb ID <input class="ds-control" name="{prefix}imdb_id" value="{escape(decision.imdb_id or '')}"></label>
+            <label class="ds-field">TMDb ID <input class="ds-control" name="{prefix}tmdb_id" value="{escape(decision.tmdb_id or '')}"></label>
+            <label class="ds-field">TVDb ID <input class="ds-control" name="{prefix}tvdb_id" value="{escape(decision.tvdb_id or '')}"></label>
+            <label class="ds-field">AniDB ID <input class="ds-control" name="{prefix}anidb_id" value="{escape(decision.anidb_id or '')}"></label>
+            <label class="ds-field">AniList ID <input class="ds-control" name="{prefix}anilist_id" value="{escape(decision.anilist_id or '')}"></label>
+            <label class="ds-field">MAL ID <input class="ds-control" name="{prefix}mal_id" value="{escape(decision.mal_id or '')}"></label>
+            <label class="ds-field wide">Notes <textarea class="ds-control" name="{prefix}notes">{escape(decision.notes or '')}</textarea></label>
           </div>
         </div>
       </details>

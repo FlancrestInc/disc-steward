@@ -89,6 +89,19 @@ def test_review_markup_adopts_win31_control_primitives(tmp_path):
     assert '<table class="ds-table"' in web.render_phase4_sections(db, config, job_id)
 
 
+def test_file_review_fields_adopt_win31_controls_but_keep_native_checkbox_layout(tmp_path):
+    config = _config(tmp_path)
+    db, job_id, source_id, _media = _job_with_source(tmp_path, config)
+
+    html = web.render_job_review(db, config, job_id)
+
+    assert f'class="ds-field">Role <select class="ds-control" name="file_{source_id}_role">' in html
+    assert f'class="ds-field">Display name <input class="ds-control" name="file_{source_id}_final_display_name"' in html
+    assert f'class="ds-field">Original title <input class="ds-control" name="file_{source_id}_original_title"' in html
+    assert f'class="ds-field wide">Notes <textarea class="ds-control" name="file_{source_id}_notes">' in html
+    assert f'<label><input type="checkbox" name="file_{source_id}_include"' in html
+
+
 def test_inline_styles_do_not_override_win31_primitives():
     html = web.page("Test", "<p>hello</p>")
 
