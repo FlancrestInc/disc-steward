@@ -123,12 +123,14 @@ dependencies = [
 
 [package.optional-dependencies]
 test = [
+    { name = "pillow" },
     { name = "pytest" },
     { name = "pytest-playwright" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "pillow", marker = "extra == 'test'", specifier = ">=10" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "pytest-playwright", marker = "extra == 'test'", specifier = ">=0.7" },
     { name = "pyyaml", specifier = ">=6.0.1" },

@@ -64,6 +64,23 @@ def test_page_wraps_content_in_a_win31_window_shell():
     assert '<div class="ds-window__body"><p>hello</p></div>' in html
 
 
+def test_window_title_is_the_page_h1(tmp_path):
+    html = web.page("Test", "<p>hello</p>")
+
+    assert '<h1 class="ds-titlebar__title">Test</h1>' in html
+
+
+def test_review_errors_and_empty_states_use_shared_accessible_surfaces(tmp_path):
+    config = _config(tmp_path)
+    db, job_id, _source_id, _media = _job_with_source(tmp_path, config)
+
+    error_html = web.render_job_review(db, config, job_id, errors=["Title is required"])
+    empty_html = web.render_phase4_sections(db, config, job_id)
+
+    assert 'class="ds-status ds-status--error errors job-errors" role="alert"' in error_html
+    assert 'class="ds-empty-state"' in empty_html
+
+
 def test_review_surfaces_adopt_win31_panel_primitives(tmp_path):
     config = _config(tmp_path)
     db, job_id, _source_id, _media = _job_with_source(tmp_path, config)

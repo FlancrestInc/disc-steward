@@ -322,3 +322,28 @@ input[type="radio"] {
 .ds-table[data-density="compact"] td {
   padding: var(--ds-space-200);
 }
+
+.ds-status,
+.ds-empty-state {
+  border: var(--ds-border-width-control) solid var(--ds-border-strong);
+  padding: var(--ds-space-300);
+  background: var(--ds-surface-sunken);
+  box-shadow:
+    inset 1px 1px 0 var(--ds-border-raised-shadow),
+    inset -1px -1px 0 var(--ds-border-raised-highlight);
+}
+
+.ds-status--error {
+  border-color: #7d1010;
+  background: var(--ds-status-danger-surface);
+  color: #651515;
+}
+
+.ds-status--success {
+  background: var(--ds-status-success-surface);
+}
+
+.ds-empty-state {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-size-caption);
+}

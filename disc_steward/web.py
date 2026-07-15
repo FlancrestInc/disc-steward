@@ -847,7 +847,7 @@ def render_job_list(db: Database, config: AppConfig) -> str:
     return page(
         "Disc Steward Review",
         f"""
-        <h1>Disc Steward Review</h1>
+        <h2>Disc Steward Review</h2>
         {render_dashboard(db, config)}
         {render_preview_queue_panel(db, config)}
         <section class="dashboard-queue">
@@ -1062,7 +1062,7 @@ def render_job_review(
         grouped[_group_for(classification_from_json(row.get("classification_json")))].append((row, decision))
     error_html = ""
     if errors:
-        error_html = "<div class='errors job-errors'>" + "".join(f"<p>{escape(error)}</p>" for error in errors) + "</div>"
+        error_html = '<div class="ds-status ds-status--error errors job-errors" role="alert">' + "".join(f"<p>{escape(error)}</p>" for error in errors) + "</div>"
     group_sections = []
     for key, label in GROUPS:
         group_sections.append(
@@ -1715,7 +1715,7 @@ def render_phase4_sections(db: Database, config: AppConfig, job_id: int) -> str:
         <div class="ds-table-wrap" role="region" aria-label="Metadata suggestions" tabindex="0">
         <table class="ds-table" data-density="compact">
           <thead><tr><th>Suggestion</th><th>Status</th><th>Payload</th></tr></thead>
-          <tbody>{suggestion_rows or '<tr><td colspan="3">No LLM suggestions stored.</td></tr>'}</tbody>
+          <tbody>{suggestion_rows or '<tr><td colspan="3"><p class="ds-empty-state">No LLM suggestions stored.</p></td></tr>'}</tbody>
         </table>
         </div>
         <h3>Cleanup</h3>
@@ -1729,7 +1729,7 @@ def render_phase4_sections(db: Database, config: AppConfig, job_id: int) -> str:
         <div class="ds-table-wrap" role="region" aria-label="Cleanup plan" tabindex="0">
         <table class="ds-table" data-density="compact">
           <thead><tr><th>Type</th><th>Eligible</th><th>Path</th><th>Reason</th></tr></thead>
-          <tbody>{cleanup_rows or '<tr><td colspan="4">No cleanup plan recorded.</td></tr>'}</tbody>
+          <tbody>{cleanup_rows or '<tr><td colspan="4"><p class="ds-empty-state">No cleanup plan recorded.</p></td></tr>'}</tbody>
         </table>
         </div>
       </section>
@@ -1971,7 +1971,7 @@ def render_ignored_job_card(row: dict) -> str:
 
 def render_validation_section(job_id: int, summary: dict | None) -> str:
     if summary is None:
-        body = "<p class='muted'>No processing validation has been recorded.</p>"
+        body = "<p class='ds-empty-state'>No processing validation has been recorded.</p>"
     else:
         item_rows = "".join(render_validation_item(job_id, item) for item in summary.get("items", []))
         warnings = "".join(f"<p class='errors'>{escape(warning)}</p>" for warning in summary.get("warnings", []))
@@ -2024,7 +2024,7 @@ def render_validation_item(job_id: int, item: dict) -> str:
 def render_transfer_section(job_id: int, validation: dict | None, summary: dict | None) -> str:
     ready = validation is not None and bool(validation.get("passed"))
     if summary is None:
-        body = "<p class='muted'>No Eddy transfer has been recorded.</p>"
+        body = "<p class='ds-empty-state'>No Eddy transfer has been recorded.</p>"
     else:
         rows = "".join(
             f"""
@@ -2182,8 +2182,8 @@ def page(title: str, body: str) -> str:
           background: repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0 2px, transparent 2px 6px);
           opacity: 0.35;
         }}
-        h1, h2, h3 {{ margin: 0.8rem 0 0.4rem; font-family: var(--font-heading); line-height: 1.05; }}
-        h1 {{
+        h1:not(.ds-titlebar__title), h2, h3 {{ margin: 0.8rem 0 0.4rem; font-family: var(--font-heading); line-height: 1.05; }}
+        h1:not(.ds-titlebar__title) {{
           display: inline-block;
           margin: 0.6rem 0 0.9rem;
           padding: 0.45rem 0.7rem;
@@ -2475,7 +2475,7 @@ def page(title: str, body: str) -> str:
         .file-card-badge-attention {{ background: #f0d6d6; color: #651515; }}
         .file-card-badge-skip {{ background: #e4e4e4; color: #5f5f5f; }}
         .file-card-badge-new {{ background: #dde8f5; color: #173b66; }}
-        .errors {{ color: #7d1010; background: #f4c6c6; border: 1px solid #7d1010; box-shadow: inset 1px 1px 0 rgba(255,255,255,0.7); border-radius: 0; padding: 8px; }}
+        .errors:not(.ds-status) {{ color: #7d1010; background: #f4c6c6; border: 1px solid #7d1010; box-shadow: inset 1px 1px 0 rgba(255,255,255,0.7); border-radius: 0; padding: 8px; }}
         .muted {{ color: var(--text-muted); }}
         .advanced-note, .eyebrow {{ font-size: 0.92rem; line-height: 1.4; }}
         .eyebrow {{ text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin: 0; }}
@@ -2484,7 +2484,7 @@ def page(title: str, body: str) -> str:
         code {{ word-break: break-all; }}
       </style>
     </head>
-    <body data-ds-theme="win31"><main><section class="ds-window app-window ds-motion-enter-window"><div class="ds-titlebar"><span>{escape(title)}</span></div><div class="ds-window__body">{body}</div></section></main>
+    <body data-ds-theme="win31"><main><section class="ds-window app-window ds-motion-enter-window"><div class="ds-titlebar"><h1 class="ds-titlebar__title">{escape(title)}</h1></div><div class="ds-window__body">{body}</div></section></main>
       <script>
       (() => {{
         window.updateDestinationPreviews = () => {{}};
