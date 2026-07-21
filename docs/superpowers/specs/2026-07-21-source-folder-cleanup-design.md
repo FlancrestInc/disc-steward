@@ -27,6 +27,10 @@ successful validation, verified final placement, available mounts, no cleanup
 hold, and elapsed retention period. The cleanup plan will identify the folder
 as `raw_rip_folder`, and live cleanup will recursively remove it.
 
+Folder cleanup rejects transfers configured with `transfer_verify: none`.
+The placement must have used size or SHA-256 verification and the recorded
+final paths must still exist when cleanup is planned.
+
 The target and raw-rip root are canonicalized before containment is checked.
 The target must be a child of, never the root itself, and symlink escapes are
 rejected. This check happens before a missing folder can be considered absent.
@@ -53,14 +57,18 @@ ignored-path record and audit event, then removes the job.
 ## Safety and observability
 
 Dry runs never remove folders. Cleanup holds block only completed-transfer
-cleanup; a deliberate Delete job action removes its raw folder immediately.
-Both paths record auditable outcomes. Missing source folders are treated as
-already absent when deleting a job, allowing the database record to be removed.
+cleanup; a deliberate Delete job action removes its raw folder immediately
+unless another job still references that folder. Both paths record auditable
+outcomes. Missing source folders are treated as already absent when deleting a
+job, allowing the database record to be removed.
 
 ## Tests and documentation
 
 Tests will cover transfer-triggered cleanup only when enabled and live, cleanup
 errors that preserve transfer success, dry runs, cleanup holds, incomplete
-transfers, raw-root/symlink path guards, shared split-job folders, folder
-archival ordering and verification, deleted-job cleanup, and deletion failures.
-The README sample will document the new opt-in setting and when it runs.
+transfers, `transfer_verify: none`, raw-root/symlink path guards, shared
+split-job folders, folder archival ordering and verification, deleted-job
+cleanup, and deletion failures. Configuration tests will cover legacy
+per-file-only cleanup, folder-only cleanup, and rejection when both modes are
+enabled. The README sample will document the new opt-in setting and when it
+runs.
