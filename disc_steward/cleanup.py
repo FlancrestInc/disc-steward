@@ -39,22 +39,23 @@ def plan_cleanup(db, config: AppConfig, job_id: int | None = None) -> CleanupPla
                     _archive_path(config, raw_path) if config.cleanup.archive_raw_rips_to_eddy else None,
                     config,
                 )
-        for item in (validation or {}).get("items", []):
-            matched = item.get("matched_output_path")
-            if not matched:
-                continue
-            _add_candidate(
-                summary,
-                job.id,
-                Path(matched),
-                "working_file",
-                config.cleanup.delete_working_files,
-                final_success,
-                hold,
-                config.cleanup.working_file_retention_days_after_import,
-                None,
-                config,
-            )
+        if not config.cleanup.delete_raw_rip_folders:
+            for item in (validation or {}).get("items", []):
+                matched = item.get("matched_output_path")
+                if not matched:
+                    continue
+                _add_candidate(
+                    summary,
+                    job.id,
+                    Path(matched),
+                    "working_file",
+                    config.cleanup.delete_working_files,
+                    final_success,
+                    hold,
+                    config.cleanup.working_file_retention_days_after_import,
+                    None,
+                    config,
+                )
     db.replace_cleanup_eligibility([asdict(item) for item in [*summary.eligible, *summary.ineligible]])
     return summary
 
@@ -249,11 +250,14 @@ def _final_success(
         return False
     if not transfer or transfer.get("status") != "imported_to_jellyfin":
         return False
+    items = transfer.get("items", [])
     if require_verified_transfer and (
-        config.transfer_verify not in {"size", "sha256"} or transfer.get("verification") not in {"size", "sha256"}
+        config.transfer_verify not in {"size", "sha256"}
+        or not items
+        or any(item.get("verification") not in {"size", "sha256"} for item in items)
     ):
         return False
-    for item in transfer.get("items", []):
+    for item in items:
         final_path = item.get("final_path")
         if not final_path:
             return False

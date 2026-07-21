@@ -84,7 +84,16 @@ def _imported_job(tmp_path: Path, config: AppConfig) -> tuple[Database, int, int
             "job_id": job_id,
             "status": "imported_to_jellyfin",
             "warnings": [],
-            "items": [{"source_file_id": source_id, "source_output_path": str(working), "incoming_path": "", "final_path": str(final_path), "status": "placed"}],
+            "items": [
+                {
+                    "source_file_id": source_id,
+                    "source_output_path": str(working),
+                    "incoming_path": "",
+                    "final_path": str(final_path),
+                    "status": "placed",
+                    "verification": "size",
+                }
+            ],
         },
     )
     db.update_job_status(job_id, "imported_to_jellyfin")
@@ -329,6 +338,33 @@ def test_folder_cleanup_requires_verified_transfer(tmp_path):
     assert any("verified transfer" in item.reason for item in summary.ineligible)
 
 
+def test_folder_cleanup_only_plans_folder_candidates(tmp_path):
+    config = _config(tmp_path)
+    config.cleanup.delete_raw_rip_folders = True
+    config.cleanup.delete_working_files = True
+    db, _job_id, _source_id, raw, _working, _final = _imported_job(tmp_path, config)
+
+    summary = plan_cleanup(db, config)
+
+    assert [(item.item_type, item.path) for item in summary.eligible] == [("raw_rip_folder", str(raw.parent))]
+    assert all(item.item_type == "raw_rip_folder" for item in summary.ineligible)
+
+
+def test_folder_cleanup_requires_item_level_verified_transfer(tmp_path):
+    config = _config(tmp_path)
+    config.cleanup.delete_raw_rip_folders = True
+    db, job_id, _source_id, raw, _working, _final = _imported_job(tmp_path, config)
+    transfer = db.latest_transfer_summary(job_id)
+    transfer["verification"] = "sha256"
+    transfer["items"][0]["verification"] = "none"
+    db.save_transfer_summary(job_id, transfer)
+
+    summary = plan_cleanup(db, config)
+
+    assert str(raw.parent) in {item.path for item in summary.ineligible}
+    assert any("verified transfer" in item.reason for item in summary.ineligible)
+
+
 def test_folder_cleanup_rejects_raw_root_and_symlink_escape(tmp_path):
     config = _config(tmp_path)
     config.cleanup.delete_raw_rip_folders = True
@@ -352,7 +388,6 @@ def test_folder_cleanup_blocks_shared_folder_until_every_job_is_complete(tmp_pat
     config = _config(tmp_path)
     config.cleanup.delete_raw_rip_folders = True
     db, job_id, _source_id, raw, _working, _final = _imported_job(tmp_path, config)
-    db.save_transfer_summary(job_id, {**db.latest_transfer_summary(job_id), "verification": "size"})
     sibling = db.upsert_job(raw.parent / "synthetic-split", "review_needed")
     with db.connect() as conn:
         conn.execute("UPDATE disc_jobs SET source_disc_path = ? WHERE id = ?", (str(raw.parent), sibling))
@@ -375,7 +410,9 @@ def test_folder_cleanup_archives_every_file_then_removes_tree(tmp_path):
     sidecar = raw.parent / "info" / "disc.txt"
     sidecar.parent.mkdir()
     sidecar.write_text("disc info", encoding="utf-8")
-    db.save_transfer_summary(job_id, {**db.latest_transfer_summary(job_id), "verification": "sha256"})
+    transfer = db.latest_transfer_summary(job_id)
+    transfer["items"][0]["verification"] = "sha256"
+    db.save_transfer_summary(job_id, transfer)
 
     summary = execute_cleanup(db, config)
 

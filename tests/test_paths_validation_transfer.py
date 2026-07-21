@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import sqlite3
 
 from disc_steward.cleanup import plan_cleanup
 from disc_steward.config import AppConfig, config_from_dict
@@ -305,6 +306,65 @@ def test_cleanup_treats_missing_controller_mount_as_unavailable_not_deleted_medi
 
     assert summary.ineligible
     assert "mount unavailable" in summary.ineligible[0].reason
+
+
+def test_transfer_item_verification_is_persisted_in_structured_records(tmp_path):
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    disc = tmp_path / "raw" / "DISC"
+    disc.mkdir(parents=True)
+    source = disc / "title.mkv"
+    source.write_bytes(b"source")
+    job_id = db.upsert_job(disc)
+    source_id = db.upsert_source_file(job_id, _source(source, size=source.stat().st_size))
+
+    db.save_transfer_summary(
+        job_id,
+        {
+            "status": "imported_to_jellyfin",
+            "items": [
+                {
+                    "source_file_id": source_id,
+                    "source_output_path": str(source),
+                    "incoming_path": "",
+                    "final_path": str(tmp_path / "final.mkv"),
+                    "status": "placed",
+                    "verification": "sha256",
+                }
+            ],
+        },
+    )
+
+    with db.connect() as conn:
+        stored = conn.execute("SELECT verification FROM transfer_items WHERE job_id = ?", (job_id,)).fetchone()
+    assert stored["verification"] == "sha256"
+
+
+def test_database_migrates_legacy_transfer_items_with_verification_column(tmp_path):
+    database_path = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE transfer_items (
+                id INTEGER PRIMARY KEY,
+                job_id INTEGER NOT NULL,
+                source_file_id INTEGER NOT NULL,
+                source_output_path TEXT NOT NULL,
+                incoming_path TEXT NOT NULL,
+                final_path TEXT NOT NULL,
+                status TEXT NOT NULL,
+                conflict TEXT,
+                error TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+    Database(database_path).initialize()
+
+    with sqlite3.connect(database_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(transfer_items)")}
+    assert "verification" in columns
 
 
 def _gospel_config(tmp_path: Path) -> AppConfig:

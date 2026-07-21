@@ -195,6 +195,7 @@ class Database:
                     incoming_path TEXT NOT NULL,
                     final_path TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    verification TEXT NOT NULL DEFAULT 'none',
                     conflict TEXT,
                     error TEXT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -352,6 +353,7 @@ class Database:
             self._ensure_column(conn, "job_reviews", "title_discovery_json", "TEXT")
             self._ensure_column(conn, "disc_jobs", "source_disc_path", "TEXT")
             self._ensure_column(conn, "disc_jobs", "split_from_job_id", "INTEGER")
+            self._ensure_column(conn, "transfer_items", "verification", "TEXT NOT NULL DEFAULT 'none'")
             self._ensure_column(conn, "source_files", "preview_status", "TEXT NOT NULL DEFAULT 'missing'")
             self._ensure_column(conn, "source_files", "preview_path", "TEXT")
             self._ensure_column(conn, "source_files", "preview_error", "TEXT")
@@ -1461,8 +1463,8 @@ class Database:
                     """
                     INSERT INTO transfer_items (
                         job_id, source_file_id, source_output_path, incoming_path,
-                        final_path, status, conflict, error
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        final_path, status, verification, conflict, error
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         job_id,
@@ -1471,6 +1473,7 @@ class Database:
                         item.get("incoming_path") or "",
                         item.get("final_path") or "",
                         item.get("status") or "",
+                        item.get("verification") or "none",
                         item.get("conflict"),
                         item.get("error"),
                     ),
