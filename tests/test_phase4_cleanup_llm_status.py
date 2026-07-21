@@ -428,7 +428,7 @@ def test_folder_cleanup_rejects_raw_root_and_symlink_escape(tmp_path):
 
     reasons = {item.job_id: item.reason for item in summary.ineligible if item.item_type == "raw_rip_folder"}
     assert "raw rip root" in reasons[root_job]
-    assert "outside raw rip root" in reasons[escape_job]
+    assert "contains a symlink" in reasons[escape_job]
 
 
 def test_folder_cleanup_blocks_shared_folder_until_every_job_is_complete(tmp_path):
