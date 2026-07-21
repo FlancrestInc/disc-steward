@@ -399,6 +399,19 @@ def test_live_folder_cleanup_refuses_empty_archive_destination(tmp_path):
     assert raw.parent.exists()
 
 
+def test_folder_cleanup_handles_missing_source_folder_without_tree_scan_error(tmp_path):
+    config = _config(tmp_path)
+    config.cleanup.delete_raw_rip_folders = True
+    db, _job_id, _source_id, raw, _working, _final = _imported_job(tmp_path, config)
+    raw.unlink()
+    raw.parent.rmdir()
+
+    summary = plan_cleanup(db, config)
+
+    assert str(raw.parent) in {item.path for item in summary.ineligible}
+    assert any("path does not exist" in item.reason for item in summary.ineligible)
+
+
 def test_folder_cleanup_rejects_raw_root_and_symlink_escape(tmp_path):
     config = _config(tmp_path)
     config.cleanup.delete_raw_rip_folders = True

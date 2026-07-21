@@ -178,6 +178,9 @@ def _folder_eligibility(db, config: AppConfig, folder: Path, members) -> tuple[b
             return False, "shared source folder has a cleanup hold"
         if not _final_success(config, job.status, validation, transfer, require_verified_transfer=True):
             return False, "shared source folder has a job without verified transfer, final import, validation, or final paths"
+    preflight_eligible, preflight_reason = _eligibility(config, folder, True, True, False, 0)
+    if not preflight_eligible:
+        return False, preflight_reason
     return _eligibility(
         config,
         folder,
