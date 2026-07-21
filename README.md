@@ -274,10 +274,15 @@ cleanup:
   enabled: false
   dry_run: true
   delete_raw_rips: false
+  delete_raw_rip_folders: false
   delete_working_files: false
 ```
 
-`cleanup-plan` records eligible and ineligible files with reasons and never deletes anything. `cleanup` requires `cleanup.enabled: true`, honors `dry_run`, requires successful validation and final Eddy placement, requires final paths to exist, respects retention days, writes audit records, and refuses jobs on cleanup hold. Raw-rip archival can be configured, but source deletion only follows verified archive copy and explicit `delete_raw_rips: true`.
+`cleanup-plan` records eligible and ineligible items with reasons and never deletes anything. `cleanup` requires `cleanup.enabled: true`, honors `dry_run`, requires successful validation and final Eddy placement, requires final paths to exist, respects retention days, writes audit records, and refuses jobs on cleanup hold.
+
+`delete_raw_rips` keeps the legacy per-file cleanup mode. `delete_raw_rip_folders` is the opt-in folder mode for automatic post-transfer cleanup. These settings are mutually exclusive. Folder mode deletes a raw disc folder only after every job sharing that source folder has completed final import, every transfer item used `size` or `sha256` verification, and every final path still exists. It uses the newest file timestamp anywhere in the source tree for retention. If `archive_raw_rips_to_eddy` is enabled in folder mode, `raw_rip_archive_path` must be set; Disc Steward copies and verifies the full tree before removing the source folder.
+
+Deleting a job from the review UI removes its raw source folder only when no other job references that folder. Shared source folders remain for the other job, and an already-missing source folder does not block deleting the job record.
 
 `status` summarizes discovered jobs, review queues, ffmpeg waits, validation needs, transfer readiness, imported jobs, validation failures, transfer conflicts, subtitle issues, cleanup eligibility, and recent errors. The web UI shows the same operational posture on the dashboard/job pages.
 

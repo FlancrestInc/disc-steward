@@ -169,6 +169,8 @@ def _canonical_raw_rip_folder(config: AppConfig, raw_folder: Path) -> tuple[Path
 
 
 def _folder_eligibility(db, config: AppConfig, folder: Path, members) -> tuple[bool, str]:
+    if config.cleanup.archive_raw_rips_to_eddy and not config.cleanup.raw_rip_archive_path:
+        return False, "raw rip archive destination is required for folder cleanup"
     for job in members:
         validation = db.latest_validation_summary(job.id)
         transfer = db.latest_transfer_summary(job.id)
@@ -183,6 +185,7 @@ def _folder_eligibility(db, config: AppConfig, folder: Path, members) -> tuple[b
         True,
         False,
         config.cleanup.raw_rip_retention_days_after_import,
+        _newest_tree_mtime(folder),
     )
 
 
@@ -193,6 +196,16 @@ def _verify_archive_tree(source: Path, archive: Path) -> None:
         archived_file = archive / source_file.relative_to(source)
         if not archived_file.is_file() or archived_file.stat().st_size != source_file.stat().st_size:
             raise IOError(f"archive verification failed: {source_file}")
+
+
+def _newest_tree_mtime(folder: Path) -> float:
+    newest = folder.stat().st_mtime
+    for child in folder.rglob("*"):
+        try:
+            newest = max(newest, child.stat().st_mtime)
+        except FileNotFoundError:
+            continue
+    return newest
 
 
 def _add_candidate(
@@ -219,7 +232,15 @@ def _add_candidate(
     (summary.eligible if eligible else summary.ineligible).append(item)
 
 
-def _eligibility(config: AppConfig, path: Path, action_configured: bool, final_success: bool, hold: bool, retention_days: int) -> tuple[bool, str]:
+def _eligibility(
+    config: AppConfig,
+    path: Path,
+    action_configured: bool,
+    final_success: bool,
+    hold: bool,
+    retention_days: int,
+    modified_time: float | None = None,
+) -> tuple[bool, str]:
     if hold:
         return False, "job is on cleanup hold"
     if not final_success:
@@ -231,7 +252,7 @@ def _eligibility(config: AppConfig, path: Path, action_configured: bool, final_s
         return False, f"mount unavailable: {unavailable}"
     if not path.exists():
         return False, "path does not exist"
-    age_days = (time.time() - path.stat().st_mtime) / 86400
+    age_days = (time.time() - (modified_time if modified_time is not None else path.stat().st_mtime)) / 86400
     if age_days < retention_days:
         return False, f"retention period has not elapsed ({age_days:.1f}/{retention_days} days)"
     return True, "validated, transferred, final path exists, and retention elapsed"

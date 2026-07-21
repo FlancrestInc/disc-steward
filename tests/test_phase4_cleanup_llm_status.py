@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import sqlite3
+import os
+import time
 from dataclasses import asdict
 
 from disc_steward.cleanup import execute_cleanup, plan_cleanup
@@ -363,6 +365,38 @@ def test_folder_cleanup_requires_item_level_verified_transfer(tmp_path):
 
     assert str(raw.parent) in {item.path for item in summary.ineligible}
     assert any("verified transfer" in item.reason for item in summary.ineligible)
+
+
+def test_folder_cleanup_retention_uses_newest_file_in_tree(tmp_path):
+    config = _config(tmp_path)
+    config.cleanup.delete_raw_rip_folders = True
+    config.cleanup.raw_rip_retention_days_after_import = 1
+    db, _job_id, _source_id, raw, _working, _final = _imported_job(tmp_path, config)
+    nested = raw.parent / "BDMV" / "index.bdmv"
+    nested.parent.mkdir()
+    old_time = time.time() - 2 * 86400
+    os.utime(raw.parent, (old_time, old_time))
+    nested.write_bytes(b"recent")
+
+    summary = plan_cleanup(db, config)
+
+    assert str(raw.parent) in {item.path for item in summary.ineligible}
+    assert any("retention period" in item.reason for item in summary.ineligible)
+
+
+def test_live_folder_cleanup_refuses_empty_archive_destination(tmp_path):
+    config = _config(tmp_path)
+    config.cleanup.enabled = True
+    config.cleanup.dry_run = False
+    config.cleanup.delete_raw_rip_folders = True
+    config.cleanup.archive_raw_rips_to_eddy = True
+    db, _job_id, _source_id, raw, _working, _final = _imported_job(tmp_path, config)
+
+    summary = execute_cleanup(db, config)
+
+    assert str(raw.parent) in {item.path for item in summary.ineligible}
+    assert any("archive destination" in item.reason for item in summary.ineligible)
+    assert raw.parent.exists()
 
 
 def test_folder_cleanup_rejects_raw_root_and_symlink_escape(tmp_path):

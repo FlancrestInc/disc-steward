@@ -109,6 +109,7 @@ cleanup:
   raw_rip_retention_days_after_import: 14
   working_file_retention_days_after_import: 7
   delete_raw_rips: false
+  delete_raw_rip_folders: false
   delete_working_files: false
   archive_raw_rips_to_eddy: false
   raw_rip_archive_path: ""
