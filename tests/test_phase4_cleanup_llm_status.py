@@ -105,6 +105,23 @@ def test_config_plumbing_keeps_phase4_risky_features_disabled_by_default():
     assert config.jellyfin_logs.enabled is False
 
 
+def test_cleanup_config_preserves_legacy_mode_and_parses_folder_mode():
+    legacy = config_from_dict({"cleanup": {"delete_raw_rips": True}})
+    folders = config_from_dict({"cleanup": {"delete_raw_rip_folders": True}})
+
+    assert legacy.cleanup.delete_raw_rips is True
+    assert legacy.cleanup.delete_raw_rip_folders is False
+    assert folders.cleanup.delete_raw_rips is False
+    assert folders.cleanup.delete_raw_rip_folders is True
+
+
+def test_cleanup_config_rejects_both_raw_rip_deletion_modes():
+    import pytest
+
+    with pytest.raises(ValueError, match="delete_raw_rips.*delete_raw_rip_folders"):
+        config_from_dict({"cleanup": {"delete_raw_rips": True, "delete_raw_rip_folders": True}})
+
+
 def test_review_page_prefills_title_discovery_fields_and_primary_continue_action(tmp_path):
     config = _config(tmp_path)
     db = Database(tmp_path / "disc_steward.sqlite3")
@@ -297,6 +314,76 @@ def test_cleanup_plan_eligibility_after_successful_import(tmp_path):
     assert str(raw) in paths
     assert str(working) in paths
     assert db.list_cleanup_eligibility(job_id)
+
+
+def test_folder_cleanup_requires_verified_transfer(tmp_path):
+    config = _config(tmp_path)
+    config.cleanup.delete_raw_rip_folders = True
+    config.transfer_verify = "none"
+    db, _job_id, _source_id, raw, _working, _final = _imported_job(tmp_path, config)
+
+    summary = plan_cleanup(db, config)
+
+    folder = raw.parent
+    assert str(folder) in {item.path for item in summary.ineligible}
+    assert any("verified transfer" in item.reason for item in summary.ineligible)
+
+
+def test_folder_cleanup_rejects_raw_root_and_symlink_escape(tmp_path):
+    config = _config(tmp_path)
+    config.cleanup.delete_raw_rip_folders = True
+    config.raw_rip_path.mkdir(parents=True)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    root_job = db.upsert_job(config.raw_rip_path, "imported_to_jellyfin")
+    escaped = tmp_path / "outside"
+    escaped.mkdir()
+    (config.raw_rip_path / "escape").symlink_to(escaped, target_is_directory=True)
+    escape_job = db.upsert_job(config.raw_rip_path / "escape", "imported_to_jellyfin")
+
+    summary = plan_cleanup(db, config)
+
+    reasons = {item.job_id: item.reason for item in summary.ineligible if item.item_type == "raw_rip_folder"}
+    assert "raw rip root" in reasons[root_job]
+    assert "outside raw rip root" in reasons[escape_job]
+
+
+def test_folder_cleanup_blocks_shared_folder_until_every_job_is_complete(tmp_path):
+    config = _config(tmp_path)
+    config.cleanup.delete_raw_rip_folders = True
+    db, job_id, _source_id, raw, _working, _final = _imported_job(tmp_path, config)
+    db.save_transfer_summary(job_id, {**db.latest_transfer_summary(job_id), "verification": "size"})
+    sibling = db.upsert_job(raw.parent / "synthetic-split", "review_needed")
+    with db.connect() as conn:
+        conn.execute("UPDATE disc_jobs SET source_disc_path = ? WHERE id = ?", (str(raw.parent), sibling))
+
+    summary = plan_cleanup(db, config, job_id=job_id)
+
+    folder_item = next(item for item in summary.ineligible if item.item_type == "raw_rip_folder")
+    assert folder_item.path == str(raw.parent)
+    assert "shared source folder" in folder_item.reason
+
+
+def test_folder_cleanup_archives_every_file_then_removes_tree(tmp_path):
+    config = _config(tmp_path)
+    config.cleanup.enabled = True
+    config.cleanup.dry_run = False
+    config.cleanup.delete_raw_rip_folders = True
+    config.cleanup.archive_raw_rips_to_eddy = True
+    config.cleanup.raw_rip_archive_path = str(tmp_path / "eddy" / "Raw Archive")
+    db, job_id, _source_id, raw, _working, _final = _imported_job(tmp_path, config)
+    sidecar = raw.parent / "info" / "disc.txt"
+    sidecar.parent.mkdir()
+    sidecar.write_text("disc info", encoding="utf-8")
+    db.save_transfer_summary(job_id, {**db.latest_transfer_summary(job_id), "verification": "sha256"})
+
+    summary = execute_cleanup(db, config)
+
+    archived = Path(config.cleanup.raw_rip_archive_path) / raw.parent.name
+    assert summary.deleted == [str(raw.parent)]
+    assert archived.joinpath("movie.mkv").read_bytes() == b"raw"
+    assert archived.joinpath("info", "disc.txt").read_text(encoding="utf-8") == "disc info"
+    assert raw.parent.exists() is False
 
 
 def test_cleanup_plan_ineligibility_before_validation_or_import(tmp_path):

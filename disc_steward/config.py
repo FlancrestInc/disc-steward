@@ -122,6 +122,7 @@ class CleanupConfig:
     raw_rip_retention_days_after_import: int = 14
     working_file_retention_days_after_import: int = 7
     delete_raw_rips: bool = False
+    delete_raw_rip_folders: bool = False
     delete_working_files: bool = False
     archive_raw_rips_to_eddy: bool = False
     raw_rip_archive_path: str = ""
@@ -449,6 +450,10 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
     jellyfin_logs = data.get("jellyfin_logs", {})
     metadata_providers = metadata.get("providers", {})
     path_mappings = _parse_path_mappings(data.get("path_mappings", {}))
+    delete_raw_rips = bool(cleanup.get("delete_raw_rips", False))
+    delete_raw_rip_folders = bool(cleanup.get("delete_raw_rip_folders", False))
+    if delete_raw_rips and delete_raw_rip_folders:
+        raise ValueError("cleanup.delete_raw_rips and cleanup.delete_raw_rip_folders cannot both be true")
     cleanup_config = CleanupConfig(
         enabled=bool(cleanup.get("enabled", data.get("cleanup_enabled", False))),
         dry_run=bool(cleanup.get("dry_run", data.get("dry_run", True))),
@@ -458,7 +463,8 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
         working_file_retention_days_after_import=int(
             cleanup.get("working_file_retention_days_after_import", data.get("working_file_retention_days", 7))
         ),
-        delete_raw_rips=bool(cleanup.get("delete_raw_rips", False)),
+        delete_raw_rips=delete_raw_rips,
+        delete_raw_rip_folders=delete_raw_rip_folders,
         delete_working_files=bool(cleanup.get("delete_working_files", False)),
         archive_raw_rips_to_eddy=bool(cleanup.get("archive_raw_rips_to_eddy", False)),
         raw_rip_archive_path=str(cleanup.get("raw_rip_archive_path", "") or ""),

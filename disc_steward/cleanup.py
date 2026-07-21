@@ -12,28 +12,33 @@ from .models import CleanupEligibilityItem, CleanupPlanSummary
 FINAL_SUCCESS_STATUSES = {"imported_to_jellyfin"}
 
 
-def plan_cleanup(db, config: AppConfig) -> CleanupPlanSummary:
+def plan_cleanup(db, config: AppConfig, job_id: int | None = None) -> CleanupPlanSummary:
     summary = CleanupPlanSummary(dry_run=config.cleanup.dry_run)
-    for job in db.list_jobs():
+    jobs = db.list_jobs()
+    if config.cleanup.delete_raw_rip_folders:
+        _plan_raw_rip_folders(summary, db, config, jobs, job_id)
+    for job in jobs:
+        if job_id is not None and job.id != job_id:
+            continue
         validation = db.latest_validation_summary(job.id)
         transfer = db.latest_transfer_summary(job.id)
         hold = db.has_cleanup_hold(job.id)
         final_success = _final_success(config, job.status, validation, transfer)
-        source_rows = db.source_file_payloads(job.id)
-        for row in source_rows:
-            raw_path = Path(row["path"])
-            _add_candidate(
-                summary,
-                job.id,
-                raw_path,
-                "raw_rip",
-                config.cleanup.delete_raw_rips or config.cleanup.archive_raw_rips_to_eddy,
-                final_success,
-                hold,
-                config.cleanup.raw_rip_retention_days_after_import,
-                _archive_path(config, raw_path) if config.cleanup.archive_raw_rips_to_eddy else None,
-                config,
-            )
+        if not config.cleanup.delete_raw_rip_folders:
+            for row in db.source_file_payloads(job.id):
+                raw_path = Path(row["path"])
+                _add_candidate(
+                    summary,
+                    job.id,
+                    raw_path,
+                    "raw_rip",
+                    config.cleanup.delete_raw_rips or config.cleanup.archive_raw_rips_to_eddy,
+                    final_success,
+                    hold,
+                    config.cleanup.raw_rip_retention_days_after_import,
+                    _archive_path(config, raw_path) if config.cleanup.archive_raw_rips_to_eddy else None,
+                    config,
+                )
         for item in (validation or {}).get("items", []):
             matched = item.get("matched_output_path")
             if not matched:
@@ -54,8 +59,8 @@ def plan_cleanup(db, config: AppConfig) -> CleanupPlanSummary:
     return summary
 
 
-def execute_cleanup(db, config: AppConfig) -> CleanupPlanSummary:
-    summary = plan_cleanup(db, config)
+def execute_cleanup(db, config: AppConfig, job_id: int | None = None) -> CleanupPlanSummary:
+    summary = plan_cleanup(db, config, job_id=job_id)
     if not config.cleanup.enabled:
         summary.errors.append("cleanup.enabled is false; no files were changed")
         db.save_cleanup_attempt("disabled", _summary_dict(summary))
@@ -69,16 +74,27 @@ def execute_cleanup(db, config: AppConfig) -> CleanupPlanSummary:
             if item.archive_path:
                 archive_path = Path(item.archive_path)
                 if not config.cleanup.dry_run:
-                    archive_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(path, archive_path)
-                    if archive_path.stat().st_size != path.stat().st_size:
-                        raise IOError("archive verification failed: size mismatch")
+                    if item.item_type == "raw_rip_folder":
+                        shutil.copytree(path, archive_path, dirs_exist_ok=True)
+                        _verify_archive_tree(path, archive_path)
+                    else:
+                        archive_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(path, archive_path)
+                        if archive_path.stat().st_size != path.stat().st_size:
+                            raise IOError("archive verification failed: size mismatch")
                     db.save_archive_result(item.job_id, str(path), str(archive_path), "verified")
                 summary.archived.append(str(archive_path))
-            should_delete = item.item_type == "working_file" or config.cleanup.delete_raw_rips
+            should_delete = (
+                item.item_type == "working_file"
+                or config.cleanup.delete_raw_rips
+                or (item.item_type == "raw_rip_folder" and config.cleanup.delete_raw_rip_folders)
+            )
             if should_delete:
                 if not config.cleanup.dry_run:
-                    path.unlink()
+                    if item.item_type == "raw_rip_folder":
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink()
                     summary.deleted.append(str(path))
                 db.audit("cleanup_delete" if not config.cleanup.dry_run else "cleanup_dry_run", f"Cleanup eligible: {path}", item.job_id, asdict(item))
         except Exception as exc:
@@ -89,6 +105,93 @@ def execute_cleanup(db, config: AppConfig) -> CleanupPlanSummary:
         status = "warning"
     db.save_cleanup_attempt(status, _summary_dict(summary))
     return summary
+
+
+def _plan_raw_rip_folders(summary: CleanupPlanSummary, db, config: AppConfig, jobs, job_id: int | None) -> None:
+    groups: dict[Path, list] = {}
+    invalid: list[tuple[object, Path, str]] = []
+    for job in jobs:
+        raw_folder = Path(job.source_disc_path or job.disc_path)
+        target, reason = _canonical_raw_rip_folder(config, raw_folder)
+        if reason:
+            if job_id is None or job.id == job_id:
+                invalid.append((job, raw_folder, reason))
+            continue
+        groups.setdefault(target, []).append(job)
+    for job, raw_folder, reason in invalid:
+        _add_folder_item(summary, job.id, raw_folder, False, reason, None)
+    for folder, members in groups.items():
+        selected = [member for member in members if job_id is None or member.id == job_id]
+        if not selected:
+            continue
+        representative = selected[0] if job_id is not None else members[0]
+        eligible, reason = _folder_eligibility(db, config, folder, members)
+        _add_folder_item(
+            summary,
+            representative.id,
+            folder,
+            eligible,
+            reason,
+            _archive_path(config, folder) if config.cleanup.archive_raw_rips_to_eddy else None,
+        )
+
+
+def _add_folder_item(
+    summary: CleanupPlanSummary,
+    job_id: int,
+    folder: Path,
+    eligible: bool,
+    reason: str,
+    archive_path: Path | None,
+) -> None:
+    item = CleanupEligibilityItem(
+        job_id=job_id,
+        path=str(folder),
+        item_type="raw_rip_folder",
+        eligible=eligible,
+        reason=reason,
+        archive_path=str(archive_path) if archive_path else None,
+    )
+    (summary.eligible if eligible else summary.ineligible).append(item)
+
+
+def _canonical_raw_rip_folder(config: AppConfig, raw_folder: Path) -> tuple[Path | None, str | None]:
+    root = config.raw_rip_path.resolve(strict=False)
+    target = raw_folder.resolve(strict=False)
+    if target == root:
+        return None, "raw rip root cannot be cleaned"
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return None, "raw rip folder resolves outside raw rip root"
+    return target, None
+
+
+def _folder_eligibility(db, config: AppConfig, folder: Path, members) -> tuple[bool, str]:
+    for job in members:
+        validation = db.latest_validation_summary(job.id)
+        transfer = db.latest_transfer_summary(job.id)
+        if db.has_cleanup_hold(job.id):
+            return False, "shared source folder has a cleanup hold"
+        if not _final_success(config, job.status, validation, transfer, require_verified_transfer=True):
+            return False, "shared source folder has a job without verified transfer, final import, validation, or final paths"
+    return _eligibility(
+        config,
+        folder,
+        True,
+        True,
+        False,
+        config.cleanup.raw_rip_retention_days_after_import,
+    )
+
+
+def _verify_archive_tree(source: Path, archive: Path) -> None:
+    for source_file in source.rglob("*"):
+        if not source_file.is_file():
+            continue
+        archived_file = archive / source_file.relative_to(source)
+        if not archived_file.is_file() or archived_file.stat().st_size != source_file.stat().st_size:
+            raise IOError(f"archive verification failed: {source_file}")
 
 
 def _add_candidate(
@@ -133,12 +236,22 @@ def _eligibility(config: AppConfig, path: Path, action_configured: bool, final_s
     return True, "validated, transferred, final path exists, and retention elapsed"
 
 
-def _final_success(config: AppConfig, job_status: str, validation: dict | None, transfer: dict | None) -> bool:
+def _final_success(
+    config: AppConfig,
+    job_status: str,
+    validation: dict | None,
+    transfer: dict | None,
+    require_verified_transfer: bool = False,
+) -> bool:
     if job_status not in FINAL_SUCCESS_STATUSES:
         return False
     if not validation or validation.get("passed") is not True:
         return False
     if not transfer or transfer.get("status") != "imported_to_jellyfin":
+        return False
+    if require_verified_transfer and (
+        config.transfer_verify not in {"size", "sha256"} or transfer.get("verification") not in {"size", "sha256"}
+    ):
         return False
     for item in transfer.get("items", []):
         final_path = item.get("final_path")
