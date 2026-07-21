@@ -166,9 +166,9 @@ Approved work orders are written on Barnabas under:
     item_002.work_order.json
 ```
 
-Each item JSON references the original `source_path` in Barnabas-native raw rip storage, the chosen role/content type, metadata IDs, encoding profile, subtitle policy, Barnabas-native validation output directory, Eddy/Jellyfin-native final intended library path, and preservation flags for original audio/subtitles.
+Each item JSON references the original `source_path` in Barnabas-native raw rip storage, the chosen role/content type, metadata IDs, encoding profile, subtitle policy, Barnabas-native validation output directory, and Eddy/Jellyfin-native final intended library path. Output MKVs contain video and audio only; subtitle streams are always written as external UTF-8 SRT sidecars.
 
-Each item also includes a `subtitle_plan` block. Disc Steward plans, but does not perform, risky subtitle replacement. Plans prefer UTF-8 SRT where practical, preserve originals by default, warn about default image subtitles, preserve ASS/SSA for anime or styled content, suggest SRT fallback for ASS when configured, tag forced-subtitle candidates for review, and mark generated subtitles as unverified. Image subtitle OCR and ASS fallback conversion are work-order instructions for ffmpeg or future helper scripts.
+Each item also includes a `subtitle_plan` block and one required SRT sidecar result for every source subtitle stream. Disc Steward converts supported text, ASS/SSA, and image subtitles to SRT. Image streams are rendered and OCR'd. Sidecar names retain the source language tag, or use `und` when the tag is absent. ASS/SSA styling and image appearance cannot be retained in SRT. Any unsupported stream, failed conversion, empty OCR output, malformed SRT, or missing sidecar blocks validation and transfer.
 
 Configure ffmpeg to write each processed file to the item's `barnabas_validation_output_dir`, preferably using the work-order `output_name`. If ffmpeg changes the filename, Disc Steward can still match by a sidecar JSON containing `item_id` or `source_file_id`, or by a unique job-folder output, but it will record a warning.
 
@@ -184,7 +184,7 @@ Phase 4 includes conservative helper scaffolds under `scripts/`:
 - `validate_srt`
 - `tag_subtitle_streams`
 
-Only `normalize_srt_utf8` and `validate_srt` perform simple sidecar-file work. The other helpers print planned intent and do not mutate media containers. They are placeholders for reviewed ffmpeg integration, not automatic replacement tools.
+Only `normalize_srt_utf8` and `validate_srt` perform simple sidecar-file work. The pipeline performs its own required ffmpeg conversion and OCR before transfer.
 
 ## Validation
 
@@ -194,7 +194,7 @@ Run:
 python -m disc_steward validate --config config.yaml --job-id 184
 ```
 
-Validation checks that each expected output exists, is readable, probes with `ffprobe`, has close duration, has sane size, has required video/audio streams, resolves to one final library path, and does not collide with another job output. The `universal_h264_aac_srt` profile requires MKV-compatible container metadata, H.264 8-bit `yuv420p`, AAC fallback audio, and no default image subtitle. Subtitle-plan validation checks for expected SRT, language tags, forced flags, ASS preservation, and original preservation where it can. Uncertain OCR/fallback results are warnings, not hard failures, so they stay visible for review. Other profiles enforce only the checks that fit their purpose.
+Validation checks that each expected output exists, is readable, probes with `ffprobe`, has close duration, has sane size, has required video/audio streams, resolves to one final library path, and does not collide with another job output. The `universal_h264_aac_srt` profile requires MKV-compatible container metadata, H.264 8-bit `yuv420p`, AAC fallback audio, and no default image subtitle. It also requires one valid UTF-8 SRT sidecar for every source subtitle stream. OCR failures and malformed or missing sidecars are hard failures. Other profiles enforce only the checks that fit their purpose.
 
 All validation results, warnings, detected streams, and ffprobe summaries are stored in SQLite and shown on the job page. Manual acceptance is available from the UI when enabled, requires a note, and does not bypass transfer conflict checks.
 

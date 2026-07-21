@@ -355,7 +355,7 @@ def test_work_order_payload_and_files_include_barnabas_and_final_paths(tmp_path)
     assert payload["source_path"] == str(source_path)
     assert payload["barnabas_validation_output_dir"] == str(config.validation_needed_path / "job_184")
     assert payload["preserve_original_audio"] is True
-    assert payload["preserve_original_subtitles"] is True
+    assert payload["preserve_original_subtitles"] is False
     assert payload["created_by"] == "disc-steward"
 
 

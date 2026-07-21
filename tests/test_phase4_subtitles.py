@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from disc_steward.config import AppConfig
 from disc_steward.db import Database
-from disc_steward.models import AudioStream, FileReviewDecision, JobReviewMetadata, ScannedFile, SubtitleStream, VideoInfo
+from disc_steward.models import AudioStream, FileReviewDecision, JobReviewMetadata, OutputValidationItem, ScannedFile, SubtitleStream, VideoInfo
 from disc_steward.subtitle_extraction import extract_subtitle_sidecars
 import disc_steward.subtitle_extraction as subtitle_extraction
 from disc_steward.subtitle_planner import generate_subtitle_plan, validate_subtitle_plan_result
-from disc_steward.validation import validate_job_outputs
+from disc_steward.validation import _validate_subtitle_sidecars, validate_job_outputs
+import disc_steward.work_orders as work_orders
 from disc_steward.work_orders import build_fileflows_item_payload, create_ffmpeg_processing_jobs, generate_final_paths
 
 
@@ -136,7 +139,7 @@ def test_work_order_payload_includes_subtitle_plan_json(tmp_path):
 
     assert payload["subtitle_plan"]["policy"] == "ocr_image_subtitles_to_srt_preserve_original"
     assert payload["subtitle_plan"]["preferred_format"] == "srt"
-    assert payload["subtitle_plan"]["preserve_original_subtitles"] is True
+    assert payload["subtitle_plan"]["preserve_original_subtitles"] is False
     assert any(action["type"] == "ocr_to_srt" for action in payload["subtitle_plan"]["actions"])
 
 
@@ -160,7 +163,17 @@ def test_create_ffmpeg_processing_jobs_persists_subtitle_plan(tmp_path):
     item = json.loads((folder / "items" / "item_001.process.json").read_text(encoding="utf-8"))
     assert item["subtitle_plan"]["image_subtitles_default"] is True
     assert item["subtitle_plan"]["statuses"] == ["needs_ocr_to_srt", "needs_default_flag_cleanup"]
-    assert item["subtitle_outputs"] == []
+    assert item["subtitle_outputs"] == [
+        {
+            "source_stream_index": 4,
+            "source_stream_ordinal": 0,
+            "codec": "hdmv_pgs_subtitle",
+            "language": "eng",
+            "kind": "ocr",
+            "output_name": "Test Movie (2001).sub01.eng.hdmv_pgs_subtitle.srt",
+            "generated_unverified": True,
+        }
+    ]
     assert db.get_subtitle_plan(source_id)["statuses"] == ["needs_ocr_to_srt", "needs_default_flag_cleanup"]
 
 
@@ -178,7 +191,7 @@ def test_extract_text_subtitle_sidecar_does_not_require_ocr_runtime(tmp_path, mo
     assert (tmp_path / "Movie.sub01.eng.subrip.srt").read_text(encoding="utf-8").startswith("1\n")
 
 
-def test_extract_subtitle_sidecars_can_skip_image_ocr_when_disabled(tmp_path, monkeypatch):
+def test_extract_subtitle_sidecars_rejects_disabled_image_ocr(tmp_path, monkeypatch):
     source = _source(
         tmp_path / "movie.mkv",
         subtitles=[
@@ -191,20 +204,44 @@ def test_extract_subtitle_sidecars_can_skip_image_ocr_when_disabled(tmp_path, mo
     def fake_ffmpeg(command: list[str]) -> None:
         Path(command[-1]).write_text("1\n00:00:00,000 --> 00:00:01,000\nSubtitle\n\n", encoding="utf-8")
 
-    results = extract_subtitle_sidecars(
-        "ffmpeg",
-        "ffprobe",
-        source,
-        tmp_path,
-        "Movie.mkv",
-        ffmpeg_runner=fake_ffmpeg,
-        convert_image_subtitles_to_srt=False,
+    with pytest.raises(RuntimeError, match="must be enabled"):
+        extract_subtitle_sidecars(
+            "ffmpeg",
+            "ffprobe",
+            source,
+            tmp_path,
+            "Movie.mkv",
+            ffmpeg_runner=fake_ffmpeg,
+            convert_image_subtitles_to_srt=False,
+        )
+
+
+def test_sidecar_coverage_rejects_a_missing_source_stream(tmp_path):
+    source = _source(
+        tmp_path / "movie.mkv",
+        subtitles=[SubtitleStream(index=3, codec="subrip", language="eng"), SubtitleStream(index=4, codec="subrip", language="jpn")],
     )
 
-    assert len(results) == 1
-    assert results[0].kind == "text"
-    assert (tmp_path / "Movie.sub01.eng.subrip.srt").exists()
-    assert not (tmp_path / "Movie.sub02.eng.dvd_subtitle.srt").exists()
+    with pytest.raises(RuntimeError, match="source stream 4"):
+        work_orders._require_subtitle_sidecar_coverage(source, [{"source_stream_index": 3}])
+
+
+def test_ffprobe_runner_captures_packet_json_locally(tmp_path, monkeypatch):
+    calls: list[tuple[list[str], dict]] = []
+
+    class Result:
+        stdout = '{"packets": []}'
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return Result()
+
+    monkeypatch.setattr(work_orders.subprocess, "run", fake_run)
+
+    result = work_orders.build_ffprobe_runner(_config(tmp_path))(["ffprobe", "-show_packets", "movie.mkv"])
+
+    assert result == '{"packets": []}'
+    assert calls == [(["ffprobe", "-show_packets", "movie.mkv"], {"check": True, "capture_output": True, "text": True})]
 
 
 def test_extract_image_subtitle_keeps_blank_ocr_frames_aligned(tmp_path, monkeypatch):
@@ -253,6 +290,97 @@ def test_extract_image_subtitle_keeps_blank_ocr_frames_aligned(tmp_path, monkeyp
     assert "00:00:10,000 --> 00:00:11,000" not in contents
 
 
+def test_image_subtitle_without_packets_fails_instead_of_being_dropped(tmp_path, monkeypatch):
+    source = _source(tmp_path / "movie.mkv", subtitles=[SubtitleStream(index=3, codec="dvd_subtitle", language="fra")])
+    monkeypatch.setattr(subtitle_extraction, "_subtitle_packets", lambda *_args, **_kwargs: [])
+
+    with pytest.raises(RuntimeError, match="no packets"):
+        extract_subtitle_sidecars("ffmpeg", "ffprobe", source, tmp_path, "Movie.mkv", ocr_engine=object())
+
+
+def test_image_subtitle_with_no_ocr_cues_fails_instead_of_writing_empty_srt(tmp_path, monkeypatch):
+    source = _source(tmp_path / "movie.mkv", subtitles=[SubtitleStream(index=3, codec="dvd_subtitle", language="jpn")])
+    monkeypatch.setattr(
+        subtitle_extraction,
+        "_subtitle_packets",
+        lambda *_args, **_kwargs: [{"pts_time": "10.0", "duration_time": "1.0"}],
+    )
+
+    def fake_render(*args, **kwargs):
+        output_dir = args[8]
+        (output_dir / "frame_00001.png").write_bytes(b"png")
+
+    monkeypatch.setattr(subtitle_extraction, "_render_subtitle_frame_sequence", fake_render)
+
+    with pytest.raises(RuntimeError, match="no recognized text"):
+        extract_subtitle_sidecars("ffmpeg", "ffprobe", source, tmp_path, "Movie.mkv", ocr_engine=lambda _path: [None])
+
+
+def test_image_subtitle_packet_probe_can_use_injected_runner(tmp_path, monkeypatch):
+    source = _source(tmp_path / "movie.mkv", subtitles=[SubtitleStream(index=3, codec="dvd_subtitle", language="deu")])
+    commands: list[list[str]] = []
+
+    def probe_runner(command: list[str]) -> str:
+        commands.append(command)
+        return json.dumps({"packets": [{"pts_time": "10.0", "duration_time": "1.0"}]})
+
+    def fake_render(*args, **kwargs):
+        output_dir = args[8]
+        (output_dir / "frame_00001.png").write_bytes(b"png")
+
+    monkeypatch.setattr(subtitle_extraction, "_render_subtitle_frame_sequence", fake_render)
+
+    class FakeOcr:
+        def __call__(self, _image_path):
+            return [[([[0, 0], [1, 0], [1, 1], [0, 1]], "Hallo", 0.9)]]
+
+    results = extract_subtitle_sidecars(
+        "ffmpeg",
+        "ffprobe",
+        source,
+        tmp_path,
+        "Movie.mkv",
+        ocr_engine=FakeOcr(),
+        ffprobe_runner=probe_runner,
+    )
+
+    assert commands[0][commands[0].index("-select_streams") + 1] == "s:0"
+    assert results[0].output_name.endswith(".deu.dvd_subtitle.srt")
+
+
+def test_subtitle_planning_enables_image_ocr_by_default(tmp_path):
+    assert AppConfig.default_for_root(tmp_path).subtitle_planning.convert_image_subtitles_to_srt is True
+
+
+def test_sidecar_validation_rejects_malformed_srt_and_missing_source_stream(tmp_path):
+    source = _source(
+        tmp_path / "movie.mkv",
+        subtitles=[
+            SubtitleStream(index=3, codec="subrip", language="eng"),
+            SubtitleStream(index=4, codec="subrip", language="jpn"),
+        ],
+    )
+    malformed = tmp_path / "Movie.sub01.eng.subrip.srt"
+    malformed.write_text("subtitle text only\n", encoding="utf-8")
+    item = OutputValidationItem(
+        source_file_id=1,
+        expected_output_name="Movie.mkv",
+        expected_final_path="/library/Movie.mkv",
+        profile="universal_h264_aac_srt",
+        subtitle_policy="prefer_srt_preserve_original",
+    )
+
+    _validate_subtitle_sidecars(
+        item,
+        tmp_path,
+        source.subtitle_streams,
+        [{"source_stream_index": 3, "output_name": malformed.name}],
+    )
+
+    assert any("invalid SRT" in error for error in item.errors)
+    assert any("missing subtitle sidecar result for source stream 4" in error for error in item.errors)
+
+
 def test_image_subtitle_render_is_bounded_to_synthetic_clip(tmp_path):
     commands: list[list[str]] = []
 
@@ -292,7 +420,7 @@ def test_subtitle_validation_checks_selected_plan_with_warnings(tmp_path):
     assert result.warnings == []
 
 
-def test_job_validation_warns_when_subtitle_plan_cannot_confirm_srt(tmp_path):
+def test_job_validation_fails_when_expected_image_sidecar_is_missing(tmp_path):
     config = _config(tmp_path)
     db = Database(tmp_path / "disc_steward.sqlite3")
     db.initialize()
@@ -319,5 +447,5 @@ def test_job_validation_warns_when_subtitle_plan_cannot_confirm_srt(tmp_path):
 
     summary = validate_job_outputs(db, config, job_id, ffprobe_runner=lambda _path: _ffprobe_output(subtitles=[{"codec_name": "hdmv_pgs_subtitle", "default": 0}]))
 
-    assert summary.passed is True
-    assert summary.items[0].subtitle_outputs == []
+    assert summary.passed is False
+    assert any("missing subtitle sidecar" in error for error in summary.items[0].errors)

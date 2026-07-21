@@ -19,6 +19,7 @@ TEXT_SUBTITLE_CODECS = {"subrip", "srt", "webvtt", "mov_text", "ass", "ssa"}
 IMAGE_SUBTITLE_CODECS = {"hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub"}
 
 _SANITIZE_RE = re.compile(r"[<>:\"/\\|?*\x00-\x1f]")
+_SRT_TIMING_RE = re.compile(r"^\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}$")
 
 
 @dataclass
@@ -49,9 +50,12 @@ def extract_subtitle_sidecars(
     ffmpeg_runner: Callable[[list[str]], object] | None = None,
     ocr_engine: Any | None = None,
     convert_image_subtitles_to_srt: bool = True,
+    ffprobe_runner: Callable[[list[str]], str] | None = None,
 ) -> list[SubtitleSidecar]:
     output_dir.mkdir(parents=True, exist_ok=True)
     streams = list(source.subtitle_streams)
+    if not convert_image_subtitles_to_srt and any((stream.codec or "").lower() in IMAGE_SUBTITLE_CODECS for stream in streams):
+        raise RuntimeError("image subtitle OCR must be enabled for strict SRT sidecars")
     active_ocr_engine = ocr_engine
     results: list[SubtitleSidecar] = []
     for ordinal, stream in enumerate(streams):
@@ -78,8 +82,6 @@ def extract_subtitle_sidecars(
             )
             continue
         if codec in IMAGE_SUBTITLE_CODECS:
-            if not convert_image_subtitles_to_srt:
-                continue
             warnings: list[str] = []
             if active_ocr_engine is None:
                 active_ocr_engine = _create_ocr_engine()
@@ -92,6 +94,7 @@ def extract_subtitle_sidecars(
                 output_path,
                 ocr_engine=active_ocr_engine,
                 ffmpeg_runner=ffmpeg_runner,
+                ffprobe_runner=ffprobe_runner,
                 warnings=warnings,
             ):
                 results.append(
@@ -140,6 +143,7 @@ def _extract_text_subtitle(
     _run_ffmpeg(command, ffmpeg_runner)
     if not output_path.exists():
         raise RuntimeError(f"ffmpeg did not create expected subtitle file: {output_path}")
+    _validate_srt_text(output_path.read_text(encoding="utf-8"), stream_index)
 
 
 def _extract_image_subtitle(
@@ -152,13 +156,15 @@ def _extract_image_subtitle(
     *,
     ocr_engine: Any,
     ffmpeg_runner: Callable[[list[str]], object] | None = None,
+    ffprobe_runner: Callable[[list[str]], str] | None = None,
     warnings: list[str] | None = None,
 ) -> bool:
-    packets = _subtitle_packets(ffprobe_path, source.path, ordinal)
+    if ffprobe_runner is None:
+        packets = _subtitle_packets(ffprobe_path, source.path, ordinal)
+    else:
+        packets = _subtitle_packets(ffprobe_path, source.path, ordinal, ffprobe_runner=ffprobe_runner)
     if not packets:
-        if warnings is not None:
-            warnings.append(f"no packets were found for subtitle stream {stream.index}")
-        return False
+        raise RuntimeError(f"no packets were found for subtitle stream {stream.index}")
     spans = _subtitle_spans(packets)
     fps = 2
     chunk_size = 40
@@ -199,6 +205,9 @@ def _extract_image_subtitle(
                 if text:
                     cues.append((start, end, text))
     srt = _cues_to_srt(_merge_cues(cues))
+    if not srt:
+        raise RuntimeError(f"no recognized text was produced for subtitle stream {stream.index}")
+    _validate_srt_text(srt, stream.index)
     output_path.write_text(srt, encoding="utf-8")
     return True
 
@@ -238,7 +247,13 @@ def _render_subtitle_frame(
         raise RuntimeError(f"ffmpeg did not render subtitle frame: {output_path}")
 
 
-def _subtitle_packets(ffprobe_path: str, source_path: str, subtitle_ordinal: int) -> list[dict]:
+def _subtitle_packets(
+    ffprobe_path: str,
+    source_path: str,
+    subtitle_ordinal: int,
+    *,
+    ffprobe_runner: Callable[[list[str]], str] | None = None,
+) -> list[dict]:
     command = [
         ffprobe_path,
         "-v",
@@ -252,8 +267,12 @@ def _subtitle_packets(ffprobe_path: str, source_path: str, subtitle_ordinal: int
         "json",
         source_path,
     ]
-    result = subprocess.run(command, check=True, capture_output=True, text=True)
-    data = json.loads(result.stdout or "{}")
+    if ffprobe_runner is None:
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        output = result.stdout
+    else:
+        output = ffprobe_runner(command)
+    data = json.loads(output or "{}")
     return data.get("packets") or []
 
 
@@ -386,6 +405,18 @@ def _run_ffmpeg(command: list[str], ffmpeg_runner: Callable[[list[str]], object]
 
 def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.replace("\u00ad", "")).strip()
+
+
+def _validate_srt_text(contents: str, source_stream_index: int) -> None:
+    blocks = [block.strip() for block in re.split(r"\r?\n\s*\r?\n", contents.strip()) if block.strip()]
+    if not blocks:
+        raise RuntimeError(f"subtitle stream {source_stream_index} produced an empty SRT file")
+    for expected_number, block in enumerate(blocks, start=1):
+        lines = block.splitlines()
+        if len(lines) < 3 or lines[0].strip() != str(expected_number) or not _SRT_TIMING_RE.fullmatch(lines[1].strip()):
+            raise RuntimeError(f"subtitle stream {source_stream_index} produced invalid SRT")
+        if not any(line.strip() for line in lines[2:]):
+            raise RuntimeError(f"subtitle stream {source_stream_index} produced an empty SRT cue")
 
 
 def _slug(value: str | None) -> str:

@@ -8,6 +8,7 @@ from typing import Callable
 from .config import AppConfig
 from .models import AudioStream, JobValidationSummary, OutputValidationItem, ScannedFile, SubtitleStream, ValidationResult, VideoInfo
 from .scanner import IMAGE_SUBTITLE_CODECS, parse_ffprobe, run_ffprobe
+from .subtitle_extraction import _validate_srt_text
 from .subtitle_planner import validate_subtitle_plan_result
 from .notifications import send_notification
 
@@ -165,8 +166,24 @@ def _match_output(output_dir: Path, expected_name: str, source_file_id: int, pay
     return None, warnings
 
 
-def _validate_subtitle_sidecars(item: OutputValidationItem, output_dir: Path, subtitle_outputs: list[dict]) -> None:
+def _validate_subtitle_sidecars(
+    item: OutputValidationItem,
+    output_dir: Path,
+    source_streams: list[SubtitleStream],
+    subtitle_outputs: list[dict],
+) -> None:
+    result_indexes = [subtitle.get("source_stream_index") for subtitle in subtitle_outputs]
+    for stream in source_streams:
+        matches = result_indexes.count(stream.index)
+        if matches == 0:
+            item.errors.append(f"missing subtitle sidecar result for source stream {stream.index}")
+        elif matches > 1:
+            item.errors.append(f"multiple subtitle sidecar results for source stream {stream.index}")
+    source_indexes = {stream.index for stream in source_streams}
     for subtitle in subtitle_outputs:
+        source_stream_index = subtitle.get("source_stream_index")
+        if source_stream_index not in source_indexes:
+            item.errors.append(f"subtitle sidecar references unknown source stream {source_stream_index}")
         output_name = subtitle.get("output_name")
         if not output_name:
             item.errors.append("subtitle sidecar output name is missing")
@@ -185,6 +202,11 @@ def _validate_subtitle_sidecars(item: OutputValidationItem, output_dir: Path, su
             continue
         if not contents.strip():
             item.errors.append(f"subtitle sidecar is empty text: {output_name}")
+            continue
+        try:
+            _validate_srt_text(contents, int(source_stream_index))
+        except (TypeError, ValueError, RuntimeError):
+            item.errors.append(f"subtitle sidecar is invalid SRT: {output_name}")
 
 
 def _validate_matched_output(
@@ -219,8 +241,7 @@ def _validate_matched_output(
         "subtitles": [stream.__dict__ for stream in parsed.subtitle_streams],
     }
     _validate_duration(config, source, parsed, item)
-    if subtitle_outputs:
-        _validate_subtitle_sidecars(item, output_path.parent, subtitle_outputs)
+    _validate_subtitle_sidecars(item, output_path.parent, source.subtitle_streams, subtitle_outputs or [])
     if not item.expected_final_path:
         item.errors.append("generated final library path is missing")
     role_allows_no_video = item.profile in VIDEO_OPTIONAL_ROLES

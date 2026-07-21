@@ -216,8 +216,6 @@ def _subtitle_outputs_for_source(source: ScannedFile, video_name: str, *, conver
     outputs: list[dict] = []
     for ordinal, stream in enumerate(source.subtitle_streams):
         codec = (stream.codec or "").lower()
-        if codec in IMAGE_SUBTITLE_CODECS and not convert_image_subtitles_to_srt:
-            continue
         outputs.append(
             {
                 "source_stream_index": stream.index,
@@ -230,6 +228,20 @@ def _subtitle_outputs_for_source(source: ScannedFile, video_name: str, *, conver
             }
         )
     return outputs
+
+
+def _require_subtitle_sidecar_coverage(source: ScannedFile, subtitle_outputs: list[dict]) -> None:
+    source_indexes = [stream.index for stream in source.subtitle_streams]
+    result_indexes = [result.get("source_stream_index") for result in subtitle_outputs]
+    for source_index in source_indexes:
+        matches = result_indexes.count(source_index)
+        if matches == 0:
+            raise RuntimeError(f"subtitle sidecar coverage is incomplete: missing source stream {source_index}")
+        if matches > 1:
+            raise RuntimeError(f"subtitle sidecar coverage is invalid: multiple results for source stream {source_index}")
+    for result_index in result_indexes:
+        if result_index not in source_indexes:
+            raise RuntimeError(f"subtitle sidecar coverage is invalid: unknown source stream {result_index}")
 
 
 def _build_ffmpeg_command(config: AppConfig, source: ScannedFile, decision: FileReviewDecision, output_path: Path, subtitle_plan: dict | None = None) -> list[str]:
@@ -277,7 +289,7 @@ def build_ffmpeg_item_payload(
         else {
             "policy": decision.subtitle_policy,
             "preferred_format": config.preferred_subtitle_format,
-            "preserve_original_subtitles": True,
+            "preserve_original_subtitles": False,
             "statuses": ["manual_review_required"],
             "actions": [],
             "warnings": ["source stream details were unavailable when the subtitle plan was generated"],
@@ -316,7 +328,7 @@ def build_ffmpeg_item_payload(
         "barnabas_validation_output_dir": str(config.to_barnabas_path(config.validation_needed_path / f"job_{job_id}")),
         "final_library_path": str(final_path),
         "preserve_original_audio": True,
-        "preserve_original_subtitles": True,
+        "preserve_original_subtitles": config.subtitle_planning.preserve_original_subtitles,
         "processing_engine": "ffmpeg",
         "warnings": warnings,
         "created_by": "disc-steward",
@@ -395,6 +407,47 @@ def build_ffmpeg_runner(config: AppConfig) -> Callable[[list[str]], object]:
     raise ValueError(f"Unknown processing.method: {config.processing.method}")
 
 
+def build_ffprobe_runner(config: AppConfig) -> Callable[[list[str]], str]:
+    method = (config.processing.method or "local").strip().lower()
+    if method in {"", "local"}:
+        return lambda command: subprocess.run(command, check=True, capture_output=True, text=True).stdout
+    if method == "ssh":
+        target = config.processing.ssh_target.strip()
+        if not target:
+            raise ValueError("processing.ssh_target is required when processing.method is ssh")
+        user = config.processing.ssh_user.strip()
+        ssh_destination = f"{user}@{target}" if user else target
+        ssh_command = ["ssh", *config.processing.ssh_options, ssh_destination]
+        host_pipeline_root = config.to_barnabas_path(config.pipeline_root)
+        docker_image = config.processing.docker_image.strip()
+        if not docker_image:
+            raise ValueError("processing.docker_image is required when processing.method is ssh")
+        docker_state_root = config.processing.docker_state_root.strip()
+        if not docker_state_root:
+            raise ValueError("processing.docker_state_root is required when processing.method is ssh")
+
+        def run_remote(command: list[str]) -> str:
+            translated = [str(config.to_barnabas_path(part)) for part in command]
+            docker_command = [
+                "docker",
+                "run",
+                "--rm",
+                "--init",
+                "-v",
+                f"{host_pipeline_root}:{host_pipeline_root}",
+                "-v",
+                f"{docker_state_root}:{docker_state_root}",
+                "-w",
+                str(host_pipeline_root),
+                docker_image,
+                *translated,
+            ]
+            return subprocess.run([*ssh_command, shlex.join(docker_command)], check=True, capture_output=True, text=True).stdout
+
+        return run_remote
+    raise ValueError(f"Unknown processing.method: {config.processing.method}")
+
+
 def _run_ffmpeg(command: list[str], runner: Callable[[list[str]], object] | None = None) -> None:
     if runner is None:
         subprocess.run(command, check=True)
@@ -433,6 +486,7 @@ def create_ffmpeg_processing_jobs(
     item_paths: list[Path] = []
     warnings: list[str] = []
     run_ffmpeg = ffmpeg_runner or build_ffmpeg_runner(config)
+    run_ffprobe = build_ffprobe_runner(config)
     remote_processing = (config.processing.method or "local").strip().lower() == "ssh"
     processing_status = "validation_needed"
     if not config.dry_run and included:
@@ -481,6 +535,7 @@ def create_ffmpeg_processing_jobs(
                 payload["output_name"],
                 ffmpeg_runner=run_ffmpeg,
                 convert_image_subtitles_to_srt=config.subtitle_planning.convert_image_subtitles_to_srt,
+                ffprobe_runner=run_ffprobe,
             )
             payload["subtitle_outputs"] = [
                 {
@@ -495,6 +550,7 @@ def create_ffmpeg_processing_jobs(
                 }
                 for result in subtitle_results
             ]
+            _require_subtitle_sidecar_coverage(source, payload["subtitle_outputs"])
             item_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
             db.save_work_order_record(job_id, decision.source_file_id, str(item_path), payload, status="processed")
 

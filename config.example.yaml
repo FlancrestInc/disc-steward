@@ -44,8 +44,8 @@ preferred_audio_fallback_codec: aac
 preferred_subtitle_format: srt
 subtitle_planning:
   preferred_format: srt
-  preserve_original_subtitles: true
-  convert_image_subtitles_to_srt: false
+  preserve_original_subtitles: false
+  convert_image_subtitles_to_srt: true
   preserve_ass_for_anime: true
   add_srt_fallback_for_ass: true
 

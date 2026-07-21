@@ -100,8 +100,8 @@ class MetadataConfig:
 @dataclass
 class SubtitlePlanningConfig:
     preferred_format: str = "srt"
-    preserve_original_subtitles: bool = True
-    convert_image_subtitles_to_srt: bool = False
+    preserve_original_subtitles: bool = False
+    convert_image_subtitles_to_srt: bool = True
     preserve_ass_for_anime: bool = True
     add_srt_fallback_for_ass: bool = True
 
@@ -599,8 +599,8 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
         ),
         subtitle_planning=SubtitlePlanningConfig(
             preferred_format=subtitle_planning.get("preferred_format", data.get("preferred_subtitle_format", "srt")),
-            preserve_original_subtitles=bool(subtitle_planning.get("preserve_original_subtitles", True)),
-            convert_image_subtitles_to_srt=bool(subtitle_planning.get("convert_image_subtitles_to_srt", False)),
+            preserve_original_subtitles=bool(subtitle_planning.get("preserve_original_subtitles", False)),
+            convert_image_subtitles_to_srt=bool(subtitle_planning.get("convert_image_subtitles_to_srt", True)),
             preserve_ass_for_anime=bool(subtitle_planning.get("preserve_ass_for_anime", True)),
             add_srt_fallback_for_ass=bool(subtitle_planning.get("add_srt_fallback_for_ass", True)),
         ),
