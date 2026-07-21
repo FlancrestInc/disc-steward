@@ -7,6 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Callable
 
+from .cleanup import execute_cleanup
 from .config import AppConfig
 from .jellyfin import refresh_after_import
 from .models import TransferConflict, TransferItemResult, TransferSummary
@@ -69,6 +70,22 @@ def transfer_job_to_eddy(
         job_id,
         {"warnings": summary.warnings},
     )
+    if (
+        summary.status == "imported_to_jellyfin"
+        and config.cleanup.enabled
+        and config.cleanup.delete_raw_rip_folders
+        and not config.cleanup.dry_run
+    ):
+        try:
+            cleanup_summary = execute_cleanup(db, config, job_id=job_id)
+            cleanup_errors = cleanup_summary.errors
+        except Exception as exc:
+            cleanup_errors = [str(exc)]
+        if cleanup_errors:
+            warning = f"Cleanup warning: {'; '.join(cleanup_errors)}"
+            summary.warnings.append(warning)
+            db.audit("cleanup_error", warning, job_id, {"errors": cleanup_errors})
+            db.save_transfer_summary(job_id, _summary_dict(summary))
     if summary.status == "imported_to_jellyfin" and config.preview.delete_after_transfer:
         deleted = db.delete_preview_files_for_job(job_id)
         if deleted:

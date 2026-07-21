@@ -7,7 +7,8 @@ from urllib.error import HTTPError
 from disc_steward.config import AppConfig, JellyfinConfig
 from disc_steward.db import Database
 from disc_steward.jellyfin import refresh_after_import
-from disc_steward.models import AudioStream, FileReviewDecision, JobReviewMetadata, ScannedFile, SubtitleStream, VideoInfo
+from disc_steward.models import AudioStream, CleanupPlanSummary, FileReviewDecision, JobReviewMetadata, ScannedFile, SubtitleStream, VideoInfo
+import disc_steward.transfer as transfer_module
 from disc_steward.transfer import transfer_job_to_eddy
 from disc_steward.validation import validate_job_outputs
 from disc_steward.work_orders import create_ffmpeg_processing_jobs, generate_final_paths
@@ -266,6 +267,100 @@ def test_transfer_sha256_verification_detects_changed_incoming_copy(tmp_path):
     assert summary.status == "failed"
     assert "verification failed" in summary.items[0].error
     assert not final_path.exists()
+
+
+def test_transfer_deletes_raw_folder_when_live_folder_cleanup_is_enabled(tmp_path):
+    config = _config(tmp_path)
+    config.cleanup.enabled = True
+    config.cleanup.dry_run = False
+    config.cleanup.delete_raw_rip_folders = True
+    config.cleanup.raw_rip_retention_days_after_import = 0
+    db, job_id, _source_id, final_path = _reviewed_job(tmp_path, config)
+    raw_folder = config.raw_rip_path / "SPIRITED_AWAY"
+    _write_output(config, job_id, final_path)
+    validate_job_outputs(db, config, job_id, ffprobe_runner=lambda path: _output_ffprobe())
+
+    summary = transfer_job_to_eddy(db, config, job_id)
+
+    assert summary.status == "imported_to_jellyfin"
+    assert not raw_folder.exists()
+
+
+def test_transfer_leaves_raw_folder_when_folder_cleanup_is_disabled(tmp_path):
+    config = _config(tmp_path)
+    config.cleanup.enabled = False
+    config.cleanup.dry_run = False
+    config.cleanup.delete_raw_rip_folders = True
+    config.cleanup.raw_rip_retention_days_after_import = 0
+    db, job_id, _source_id, final_path = _reviewed_job(tmp_path, config)
+    raw_folder = config.raw_rip_path / "SPIRITED_AWAY"
+    _write_output(config, job_id, final_path)
+    validate_job_outputs(db, config, job_id, ffprobe_runner=lambda path: _output_ffprobe())
+
+    summary = transfer_job_to_eddy(db, config, job_id)
+
+    assert summary.status == "imported_to_jellyfin"
+    assert raw_folder.exists()
+    assert not any(event["event_type"] == "cleanup_error" for event in db.list_audit_events(job_id))
+
+
+def test_transfer_does_not_invoke_dry_run_folder_cleanup(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    config.cleanup.enabled = True
+    config.cleanup.dry_run = True
+    config.cleanup.delete_raw_rip_folders = True
+    db, job_id, _source_id, final_path = _reviewed_job(tmp_path, config)
+    raw_folder = config.raw_rip_path / "SPIRITED_AWAY"
+    _write_output(config, job_id, final_path)
+    validate_job_outputs(db, config, job_id, ffprobe_runner=lambda path: _output_ffprobe())
+
+    monkeypatch.setattr(transfer_module, "execute_cleanup", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("cleanup invoked")))
+    summary = transfer_job_to_eddy(db, config, job_id)
+
+    assert summary.status == "imported_to_jellyfin"
+    assert raw_folder.exists()
+    assert not any(event["event_type"] == "cleanup_error" for event in db.list_audit_events(job_id))
+
+
+def test_transfer_records_cleanup_summary_errors_as_warnings(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    config.cleanup.enabled = True
+    config.cleanup.dry_run = False
+    config.cleanup.delete_raw_rip_folders = True
+    db, job_id, _source_id, final_path = _reviewed_job(tmp_path, config)
+    _write_output(config, job_id, final_path)
+    validate_job_outputs(db, config, job_id, ffprobe_runner=lambda path: _output_ffprobe())
+    monkeypatch.setattr(transfer_module, "execute_cleanup", lambda *_args, **_kwargs: CleanupPlanSummary(errors=["disk busy"]))
+
+    summary = transfer_job_to_eddy(db, config, job_id)
+
+    assert summary.status == "imported_to_jellyfin"
+    assert db.get_job(job_id).status == "imported_to_jellyfin"
+    assert "Cleanup warning: disk busy" in summary.warnings
+    assert "Cleanup warning: disk busy" in db.latest_transfer_summary(job_id)["warnings"]
+    assert any(event["event_type"] == "cleanup_error" and "disk busy" in event["message"] for event in db.list_audit_events(job_id))
+
+
+def test_transfer_records_cleanup_exception_as_warning(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    config.cleanup.enabled = True
+    config.cleanup.dry_run = False
+    config.cleanup.delete_raw_rip_folders = True
+    db, job_id, _source_id, final_path = _reviewed_job(tmp_path, config)
+    _write_output(config, job_id, final_path)
+    validate_job_outputs(db, config, job_id, ffprobe_runner=lambda path: _output_ffprobe())
+
+    def raise_cleanup_error(*_args, **_kwargs):
+        raise RuntimeError("cleanup crashed")
+
+    monkeypatch.setattr(transfer_module, "execute_cleanup", raise_cleanup_error)
+    summary = transfer_job_to_eddy(db, config, job_id)
+
+    assert summary.status == "imported_to_jellyfin"
+    assert db.get_job(job_id).status == "imported_to_jellyfin"
+    assert "Cleanup warning: cleanup crashed" in summary.warnings
+    assert "Cleanup warning: cleanup crashed" in db.latest_transfer_summary(job_id)["warnings"]
+    assert any(event["event_type"] == "cleanup_error" and "cleanup crashed" in event["message"] for event in db.list_audit_events(job_id))
 
 
 def test_jellyfin_disabled_records_skipped_without_error(tmp_path):
