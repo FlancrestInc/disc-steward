@@ -373,6 +373,7 @@ class Database:
 
     def upsert_job(self, disc_path: Path, status: str = "scanned") -> int:
         resolved = str(disc_path.resolve())
+        source_path = str(disc_path.absolute())
         title = disc_path.name
         with self.connect() as conn:
             conn.execute(
@@ -384,7 +385,7 @@ class Database:
                     source_disc_path=COALESCE(disc_jobs.source_disc_path, excluded.source_disc_path),
                     updated_at=CURRENT_TIMESTAMP
                 """,
-                (title, resolved, resolved, status),
+                (title, resolved, source_path, status),
             )
             return int(conn.execute("SELECT id FROM disc_jobs WHERE disc_path = ?", (resolved,)).fetchone()["id"])
 
