@@ -7,6 +7,8 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+import pytest
+
 from disc_steward.config import AppConfig, MetadataProviderConfig
 from disc_steward.db import Database
 from disc_steward.metadata import MetadataCandidate, MetadataLookupResult
@@ -958,3 +960,122 @@ def test_phase3_sections_show_automation_queue_details(tmp_path):
     assert "running now" in html
     assert "position 1 in queue" in html
     assert "automation running" in html or "queued for automation" in html
+
+
+def test_delete_job_deletes_an_exclusive_raw_source_folder_then_ignores_it(tmp_path):
+    config = _config(tmp_path)
+    disc = config.raw_rip_path / "EXCLUSIVE_RIP"
+    disc.mkdir(parents=True)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    job_id = db.upsert_job(disc)
+
+    assert web.handle_job_action(db, config, job_id, "delete-job", {}) == "redirect:/"
+
+    assert not disc.exists()
+    assert db.get_job(job_id) is None
+    assert db.list_ignored_disc_paths() == [str(disc.resolve())]
+    assert db.list_audit_events(job_id)[-1]["event_type"] == "job_deleted"
+
+
+def test_delete_job_allows_an_exclusive_missing_raw_source_folder(tmp_path):
+    config = _config(tmp_path)
+    disc = config.raw_rip_path / "MISSING_RIP"
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    job_id = db.upsert_job(disc)
+
+    assert web.handle_job_action(db, config, job_id, "delete-job", {}) == "redirect:/"
+
+    assert db.get_job(job_id) is None
+    assert db.list_ignored_disc_paths() == [str(disc.resolve())]
+
+
+def test_delete_job_keeps_a_source_folder_still_referenced_by_a_split_job(tmp_path):
+    config = _config(tmp_path)
+    disc = config.raw_rip_path / "SPLIT_RIP"
+    disc.mkdir(parents=True)
+    first = disc / "first.mkv"
+    second = disc / "second.mkv"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    parent_job_id = db.upsert_job(disc)
+    db.upsert_source_file(parent_job_id, _source(first))
+    second_id = db.upsert_source_file(parent_job_id, _source(second))
+    split_job_id = db.create_split_job(parent_job_id, second_id)
+
+    assert web.handle_job_action(db, config, parent_job_id, "delete-job", {}) == "redirect:/"
+
+    assert disc.exists()
+    assert db.get_job(parent_job_id) is None
+    assert db.get_job(split_job_id) is not None
+    assert db.list_ignored_disc_paths() == []
+    assert db.list_audit_events(parent_job_id)[-1]["event_type"] == "job_deleted_shared_source"
+
+
+def test_delete_job_rejects_the_raw_rip_root_before_ignoring_or_deleting(tmp_path):
+    config = _config(tmp_path)
+    config.raw_rip_path.mkdir(parents=True)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    job_id = db.upsert_job(config.raw_rip_path)
+
+    with pytest.raises(ValueError, match="raw rip root cannot be cleaned"):
+        web.handle_job_action(db, config, job_id, "delete-job", {})
+
+    assert db.get_job(job_id) is not None
+    assert db.list_ignored_disc_paths() == []
+    event = db.list_audit_events(job_id)[-1]
+    assert event["event_type"] == "cleanup_error"
+    assert event["payload"]["path"] == str(config.raw_rip_path.resolve())
+    assert event["payload"]["reason"] == "raw rip root cannot be cleaned"
+
+
+def test_delete_job_rejects_a_symlink_that_escapes_the_raw_rip_root(tmp_path):
+    config = _config(tmp_path)
+    config.raw_rip_path.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    disc = config.raw_rip_path / "ESCAPE"
+    disc.symlink_to(outside, target_is_directory=True)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    job_id = db.upsert_job(disc)
+
+    with pytest.raises(ValueError, match="outside raw rip root"):
+        web.handle_job_action(db, config, job_id, "delete-job", {})
+
+    assert db.get_job(job_id) is not None
+    assert db.list_ignored_disc_paths() == []
+    event = db.list_audit_events(job_id)[-1]
+    assert event["event_type"] == "cleanup_error"
+    assert event["payload"] == {
+        "path": str(disc.resolve()),
+        "reason": "raw rip folder resolves outside raw rip root",
+    }
+
+
+def test_delete_job_keeps_the_job_when_raw_folder_deletion_fails(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    disc = config.raw_rip_path / "BUSY_RIP"
+    disc.mkdir(parents=True)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    job_id = db.upsert_job(disc)
+
+    def fail_rmtree(_path):
+        raise OSError("disk busy")
+
+    monkeypatch.setattr(web.shutil, "rmtree", fail_rmtree)
+
+    with pytest.raises(ValueError, match="disk busy"):
+        web.handle_job_action(db, config, job_id, "delete-job", {})
+
+    assert db.get_job(job_id) is not None
+    assert db.list_ignored_disc_paths() == []
+    event = db.list_audit_events(job_id)[-1]
+    assert event["event_type"] == "cleanup_error"
+    assert event["payload"]["path"] == str(disc.resolve())
+    assert event["payload"]["reason"] == "disk busy"

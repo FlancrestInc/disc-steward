@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .config import AppConfig
-from .cleanup import plan_cleanup
+from .cleanup import _canonical_raw_rip_folder, plan_cleanup
 from .db import Database
 from .llm import request_suggestions
 from .metadata import apply_stored_metadata_candidate, lookup_file_metadata, lookup_job_metadata, metadata_provider_status
@@ -454,7 +454,36 @@ def handle_job_action(db: Database, config: AppConfig, job_id: int, action: str,
         job = db.get_job(job_id)
         if job is None:
             raise ValueError(f"Unknown job: {job_id}")
-        ignore_path = job.source_disc_path or job.disc_path
+        source_folder = Path(job.source_disc_path or job.disc_path)
+        canonical_folder, unsafe_reason = _canonical_raw_rip_folder(config, source_folder)
+        if unsafe_reason:
+            db.audit(
+                "cleanup_error",
+                unsafe_reason,
+                job_id,
+                {"path": str(source_folder.resolve(strict=False)), "reason": unsafe_reason},
+            )
+            raise ValueError(unsafe_reason)
+        assert canonical_folder is not None
+        other_jobs = db.find_other_jobs_referencing_source_folder(canonical_folder, job_id)
+        if other_jobs:
+            db.audit(
+                "job_deleted_shared_source",
+                "Deleted job from the queue; kept source folder referenced by another job",
+                job_id,
+                {"disc_title": job.disc_title, "source_folder": str(canonical_folder), "other_job_ids": [other.id for other in other_jobs]},
+            )
+            if not db.delete_job(job_id):
+                raise ValueError(f"Unknown job: {job_id}")
+            return "redirect:/"
+        if canonical_folder.exists():
+            try:
+                shutil.rmtree(canonical_folder)
+            except OSError as exc:
+                reason = str(exc)
+                db.audit("cleanup_error", reason, job_id, {"path": str(canonical_folder), "reason": reason})
+                raise ValueError(reason) from exc
+        ignore_path = canonical_folder
         db.ignore_disc_path(
             ignore_path,
             reason=f"deleted job {job_id}",

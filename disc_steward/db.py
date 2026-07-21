@@ -604,6 +604,15 @@ class Database:
             split_from_job_id=row["split_from_job_id"],
         )
 
+    def find_other_jobs_referencing_source_folder(self, source_folder: str | Path, exclude_job_id: int) -> list[Job]:
+        canonical_source = Path(source_folder).resolve(strict=False)
+        return [
+            job
+            for job in self.list_jobs()
+            if job.id != exclude_job_id
+            and Path(job.source_disc_path or job.disc_path).resolve(strict=False) == canonical_source
+        ]
+
     def delete_job(self, job_id: int) -> bool:
         with self.connect() as conn:
             cursor = conn.execute("DELETE FROM disc_jobs WHERE id = ?", (job_id,))
