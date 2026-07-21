@@ -221,6 +221,15 @@ def _job_with_source(tmp_path: Path, config: AppConfig) -> tuple[Database, int, 
     return db, job_id, source_id, media
 
 
+def _job_with_stored_source_folder(db: Database, source_folder: Path) -> int:
+    with db.connect() as conn:
+        cursor = conn.execute(
+            "INSERT INTO disc_jobs (disc_title, disc_path, source_disc_path, status) VALUES (?, ?, ?, ?)",
+            (source_folder.name, str(source_folder), str(source_folder), "scanned"),
+        )
+        return int(cursor.lastrowid)
+
+
 def _job_with_two_sources(tmp_path: Path, config: AppConfig) -> tuple[Database, int, int, int, Path, Path]:
     db = Database(tmp_path / "disc_steward.sqlite3")
     db.initialize()
@@ -1055,6 +1064,68 @@ def test_delete_job_rejects_a_symlink_that_escapes_the_raw_rip_root(tmp_path):
         "path": str(disc.resolve()),
         "reason": "raw rip folder resolves outside raw rip root",
     }
+
+
+def test_delete_job_rejects_an_internal_raw_rip_symlink_before_deleting_its_target(tmp_path):
+    config = _config(tmp_path)
+    target = config.raw_rip_path / "TARGET"
+    target.mkdir(parents=True)
+    disc = config.raw_rip_path / "INTERNAL_LINK"
+    disc.symlink_to(target, target_is_directory=True)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    job_id = _job_with_stored_source_folder(db, disc)
+
+    with pytest.raises(ValueError, match="symlink"):
+        web.handle_job_action(db, config, job_id, "delete-job", {})
+
+    assert target.exists()
+    assert db.get_job(job_id) is not None
+    assert db.list_ignored_disc_paths() == []
+    event = db.list_audit_events(job_id)[-1]
+    assert event["event_type"] == "cleanup_error"
+    assert event["payload"] == {"path": str(disc), "reason": "raw rip folder path contains a symlink"}
+
+
+def test_delete_job_rejects_a_dangling_raw_rip_symlink_before_ignoring_or_deleting(tmp_path):
+    config = _config(tmp_path)
+    config.raw_rip_path.mkdir(parents=True)
+    disc = config.raw_rip_path / "DANGLING_LINK"
+    disc.symlink_to(config.raw_rip_path / "missing-target", target_is_directory=True)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    job_id = _job_with_stored_source_folder(db, disc)
+
+    with pytest.raises(ValueError, match="symlink"):
+        web.handle_job_action(db, config, job_id, "delete-job", {})
+
+    assert db.get_job(job_id) is not None
+    assert db.list_ignored_disc_paths() == []
+    event = db.list_audit_events(job_id)[-1]
+    assert event["event_type"] == "cleanup_error"
+    assert event["payload"] == {"path": str(disc), "reason": "raw rip folder path contains a symlink"}
+
+
+def test_delete_job_rejects_a_raw_rip_path_below_a_symlinked_directory(tmp_path):
+    config = _config(tmp_path)
+    target = config.raw_rip_path / "TARGET_PARENT" / "RIP"
+    target.mkdir(parents=True)
+    link_parent = config.raw_rip_path / "LINK_PARENT"
+    link_parent.symlink_to(target.parent, target_is_directory=True)
+    disc = link_parent / "RIP"
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    job_id = _job_with_stored_source_folder(db, disc)
+
+    with pytest.raises(ValueError, match="symlink"):
+        web.handle_job_action(db, config, job_id, "delete-job", {})
+
+    assert target.exists()
+    assert db.get_job(job_id) is not None
+    assert db.list_ignored_disc_paths() == []
+    event = db.list_audit_events(job_id)[-1]
+    assert event["event_type"] == "cleanup_error"
+    assert event["payload"] == {"path": str(disc), "reason": "raw rip folder path contains a symlink"}
 
 
 def test_delete_job_keeps_the_job_when_raw_folder_deletion_fails(tmp_path, monkeypatch):

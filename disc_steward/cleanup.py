@@ -158,7 +158,17 @@ def _add_folder_item(
 
 def _canonical_raw_rip_folder(config: AppConfig, raw_folder: Path) -> tuple[Path | None, str | None]:
     root = config.raw_rip_path.resolve(strict=False)
-    target = raw_folder.resolve(strict=False)
+    lexical_folder = raw_folder.absolute()
+    try:
+        relative_folder = lexical_folder.relative_to(root)
+    except ValueError:
+        return None, "raw rip folder resolves outside raw rip root"
+    current = root
+    for component in relative_folder.parts:
+        current = current / component
+        if current.is_symlink():
+            return None, "raw rip folder path contains a symlink"
+    target = lexical_folder.resolve(strict=False)
     if target == root:
         return None, "raw rip root cannot be cleaned"
     try:

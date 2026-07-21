@@ -461,7 +461,7 @@ def handle_job_action(db: Database, config: AppConfig, job_id: int, action: str,
                 "cleanup_error",
                 unsafe_reason,
                 job_id,
-                {"path": str(source_folder.resolve(strict=False)), "reason": unsafe_reason},
+                {"path": str(source_folder), "reason": unsafe_reason},
             )
             raise ValueError(unsafe_reason)
         assert canonical_folder is not None
