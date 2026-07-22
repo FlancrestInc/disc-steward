@@ -7,6 +7,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+User=ryan
+Group=ryan
 WorkingDirectory=/home/ryan/projects/disc-steward
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/home/ryan/.config/disc-steward/disc-steward.env
@@ -19,7 +21,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/home/ryan/projects/disc-steward /run/disc-steward
+ReadWritePaths=/home/ryan/projects/disc-steward /run/disc-steward /var/lib/disc-steward
 
 [Install]
 WantedBy=disc-steward.target

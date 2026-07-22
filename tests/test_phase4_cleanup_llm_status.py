@@ -340,6 +340,32 @@ def test_live_legacy_raw_file_cleanup_deletes_eligible_raw_file(tmp_path):
     assert not raw.exists()
 
 
+def test_live_cleanup_uses_barnabas_docker_for_ssh_processing(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    config.cleanup.enabled = True
+    config.cleanup.dry_run = False
+    config.cleanup.delete_raw_rips = True
+    config.processing.method = "ssh"
+    config.processing.ssh_target = "barnabas.lan"
+    config.processing.ssh_user = "flan"
+    config.processing.docker_image = "disc-steward-ffmpeg:bookworm"
+    db, _job_id, _source_id, raw, _working, _final = _imported_job(tmp_path, config)
+    deleted: list[tuple[Path, bool]] = []
+
+    def fake_remote_delete(config_arg, path: Path, *, recursive: bool) -> None:
+        assert config_arg is config
+        deleted.append((path, recursive))
+        path.unlink()
+
+    monkeypatch.setattr("disc_steward.cleanup._delete_on_barnabas", fake_remote_delete)
+
+    summary = execute_cleanup(db, config)
+
+    assert summary.deleted == [str(raw)]
+    assert deleted == [(raw, False)]
+    assert not raw.exists()
+
+
 def test_folder_cleanup_requires_verified_transfer(tmp_path):
     config = _config(tmp_path)
     config.cleanup.delete_raw_rip_folders = True

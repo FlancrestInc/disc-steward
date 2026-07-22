@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import shutil
+import shlex
+import subprocess
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -98,9 +100,9 @@ def execute_cleanup(db, config: AppConfig, job_id: int | None = None) -> Cleanup
             if should_delete:
                 if not config.cleanup.dry_run:
                     if item.item_type == "raw_rip_folder":
-                        shutil.rmtree(path)
+                        _delete_path(config, path, recursive=True)
                     else:
-                        path.unlink()
+                        _delete_path(config, path, recursive=False)
                     summary.deleted.append(str(path))
                 db.audit("cleanup_delete" if not config.cleanup.dry_run else "cleanup_dry_run", f"Cleanup eligible: {path}", item.job_id, asdict(item))
         except Exception as exc:
@@ -285,13 +287,50 @@ def cleanup_previews(db, config: AppConfig, job_id: int | None = None) -> Cleanu
                     summary.errors.append(f"{value}: {reason}")
                     continue
                 if path.exists():
-                    path.unlink()
+                    _delete_path(config, path, recursive=False)
                 db.clear_preview_metadata(int(row["id"]))
                 summary.deleted.append(str(path))
             except Exception as exc:
                 summary.errors.append(f"{path}: {exc}")
                 db.audit("preview_cleanup_error", str(exc), job.id, {"source_file_id": row["id"], "preview_path": str(path)})
     return summary
+
+
+def _delete_path(config: AppConfig, path: Path, *, recursive: bool) -> None:
+    if (config.processing.method or "local").strip().lower() == "ssh":
+        _delete_on_barnabas(config, path, recursive=recursive)
+        return
+    if recursive:
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
+def _delete_on_barnabas(config: AppConfig, path: Path, *, recursive: bool) -> None:
+    target = config.processing.ssh_target.strip()
+    if not target:
+        raise ValueError("processing.ssh_target is required for remote cleanup")
+    user = config.processing.ssh_user.strip()
+    destination = f"{user}@{target}" if user else target
+    image = config.processing.docker_image.strip()
+    if not image:
+        raise ValueError("processing.docker_image is required for remote cleanup")
+    remote_pipeline_root = config.to_barnabas_path(config.pipeline_root)
+    remote_path = config.to_barnabas_path(path)
+    remove_args = ["rm", "-rf" if recursive else "-f", "--", str(remote_path)]
+    docker_command = [
+        "docker", "run", "--rm", "--init",
+        "-v", f"{remote_pipeline_root}:{remote_pipeline_root}",
+        "-w", str(remote_pipeline_root),
+        image,
+        *remove_args,
+    ]
+    subprocess.run(
+        ["ssh", *config.processing.ssh_options, destination, shlex.join(docker_command)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def _folder_eligibility(db, config: AppConfig, folder: Path, members) -> tuple[bool, str]:

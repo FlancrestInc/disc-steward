@@ -131,6 +131,37 @@ def test_cleanup_previews_rejects_tracked_path_outside_preview_root(tmp_path):
     assert db.source_file_payload(source_id)["preview_path"] == str(outside)
 
 
+def test_cleanup_previews_uses_barnabas_docker_for_ssh_processing(tmp_path, monkeypatch):
+    db, config, job_id, source_id, media, preview_path = _db_with_source(tmp_path)
+    config.processing.method = "ssh"
+    config.processing.ssh_target = "barnabas.lan"
+    config.processing.ssh_user = "flan"
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    preview_path.write_bytes(b"preview")
+    db.queue_preview_job(job_id, source_id, "source", str(preview_path), source_size_bytes=1, source_modified_time=1)
+    db.finish_preview_job(source_id, state="ready", preview_path=str(preview_path))
+    db.save_validation_summary(job_id, {"passed": True, "items": []}, True)
+    db.save_transfer_summary(job_id, {
+        "status": "imported_to_jellyfin",
+        "items": [{"source_file_id": source_id, "final_path": str(media), "status": "placed", "verification": "size"}],
+    })
+    db.update_job_status(job_id, "imported_to_jellyfin")
+    deleted: list[tuple[Path, bool]] = []
+
+    def fake_remote_delete(_config, path: Path, *, recursive: bool) -> None:
+        deleted.append((path, recursive))
+        path.unlink()
+
+    monkeypatch.setattr("disc_steward.cleanup._delete_on_barnabas", fake_remote_delete)
+
+    summary = cleanup_previews(db, config, job_id=job_id)
+
+    assert not summary.errors, summary.errors
+    assert summary.deleted == [str(preview_path)]
+    assert deleted == [(preview_path, False)]
+    assert db.source_file_payload(source_id)["preview_path"] is None
+
+
 def test_cancelled_preview_worker_cannot_publish_temp_file(tmp_path, monkeypatch):
     db, config, job_id, source_id, media, preview_path = _db_with_source(tmp_path)
     db.queue_preview_job(job_id, source_id, str(media), str(preview_path), source_size_bytes=media.stat().st_size, source_modified_time=media.stat().st_mtime)
