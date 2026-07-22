@@ -15,6 +15,7 @@ FINAL_SUCCESS_STATUSES = {"imported_to_jellyfin"}
 def plan_cleanup(db, config: AppConfig, job_id: int | None = None) -> CleanupPlanSummary:
     summary = CleanupPlanSummary(dry_run=config.cleanup.dry_run)
     jobs = db.list_jobs()
+    seen_working_paths: set[Path] = set()
     if config.cleanup.delete_raw_rip_folders:
         _plan_raw_rip_folders(summary, db, config, jobs, job_id)
     for job in jobs:
@@ -39,23 +40,22 @@ def plan_cleanup(db, config: AppConfig, job_id: int | None = None) -> CleanupPla
                     _archive_path(config, raw_path) if config.cleanup.archive_raw_rips_to_eddy else None,
                     config,
                 )
-        if not config.cleanup.delete_raw_rip_folders:
-            for item in (validation or {}).get("items", []):
-                matched = item.get("matched_output_path")
-                if not matched:
-                    continue
-                _add_candidate(
-                    summary,
-                    job.id,
-                    Path(matched),
-                    "working_file",
-                    config.cleanup.delete_working_files,
-                    final_success,
-                    hold,
-                    config.cleanup.working_file_retention_days_after_import,
-                    None,
-                    config,
-                )
+        for item in (validation or {}).get("items", []):
+            matched = item.get("matched_output_path")
+            if not matched:
+                continue
+            working_path, safety_reason = _canonical_working_file(config, Path(matched))
+            if working_path is None:
+                _add_item(summary, job.id, Path(matched), "working_file", False, safety_reason or "unsafe working path")
+                continue
+            if working_path in seen_working_paths:
+                continue
+            seen_working_paths.add(working_path)
+            _add_candidate(
+                summary, job.id, working_path, "working_file", config.cleanup.delete_working_files,
+                _final_success(config, job.status, validation, transfer, require_verified_transfer=True), hold,
+                config.cleanup.working_file_retention_days_after_import, None, config,
+            )
     db.replace_cleanup_eligibility([asdict(item) for item in [*summary.eligible, *summary.ineligible]])
     return summary
 
@@ -72,6 +72,11 @@ def execute_cleanup(db, config: AppConfig, job_id: int | None = None) -> Cleanup
             summary.errors.append(f"eligible path no longer exists: {path}")
             continue
         try:
+            safe_path, reason = _execution_safe_path(db, config, item)
+            if safe_path is None:
+                summary.errors.append(f"{path}: {reason}")
+                continue
+            path = safe_path
             if item.archive_path:
                 archive_path = Path(item.archive_path)
                 if not config.cleanup.dry_run:
@@ -156,26 +161,137 @@ def _add_folder_item(
     (summary.eligible if eligible else summary.ineligible).append(item)
 
 
+def _add_item(summary: CleanupPlanSummary, job_id: int, path: Path, item_type: str, eligible: bool, reason: str) -> None:
+    item = CleanupEligibilityItem(job_id=job_id, path=str(path), item_type=item_type, eligible=eligible, reason=reason)
+    (summary.eligible if eligible else summary.ineligible).append(item)
+
+
 def _canonical_raw_rip_folder(config: AppConfig, raw_folder: Path) -> tuple[Path | None, str | None]:
-    root = config.raw_rip_path.resolve(strict=False)
-    lexical_folder = raw_folder.absolute()
-    try:
-        relative_folder = lexical_folder.relative_to(root)
-    except ValueError:
+    target, reason = _canonical_child(raw_folder, [config.raw_rip_path], "raw rip")
+    if reason == "raw rip path contains a symlink":
+        return None, "raw rip folder path contains a symlink"
+    if reason == "raw rip resolves outside configured root":
         return None, "raw rip folder resolves outside raw rip root"
-    current = root
-    for component in relative_folder.parts:
-        current = current / component
+    return target, reason
+
+
+def _canonical_working_file(config: AppConfig, path: Path) -> tuple[Path | None, str | None]:
+    return _canonical_child(path, [config.fileflows_working_path, config.validation_needed_path], "working file")
+
+
+def _canonical_child(path: Path, roots: list[Path], label: str) -> tuple[Path | None, str | None]:
+    lexical_folder = path.absolute()
+    for configured_root in roots:
+        root = configured_root.absolute()
+        try:
+            relative_folder = lexical_folder.relative_to(root)
+        except ValueError:
+            continue
+        if not relative_folder.parts:
+            return None, f"{label} root cannot be cleaned"
+        current = root
         if current.is_symlink():
-            return None, "raw rip folder path contains a symlink"
-    target = lexical_folder.resolve(strict=False)
-    if target == root:
-        return None, "raw rip root cannot be cleaned"
-    try:
-        target.relative_to(root)
-    except ValueError:
-        return None, "raw rip folder resolves outside raw rip root"
-    return target, None
+            return None, f"{label} path contains a symlink"
+        for component in relative_folder.parts:
+            current = current / component
+            if current.is_symlink():
+                return None, f"{label} path contains a symlink"
+        resolved_root = root.resolve(strict=False)
+        target = lexical_folder.resolve(strict=False)
+        try:
+            target.relative_to(resolved_root)
+        except ValueError:
+            return None, f"{label} resolves outside configured root"
+        return target, None
+    return None, f"{label} resolves outside configured root"
+
+
+def _execution_safe_path(db, config: AppConfig, item: CleanupEligibilityItem) -> tuple[Path | None, str | None]:
+    job = db.get_job(item.job_id)
+    if job is None:
+        return None, "job no longer exists"
+    if db.has_cleanup_hold(job.id):
+        return None, "job is on cleanup hold"
+    validation = db.latest_validation_summary(job.id)
+    transfer = db.latest_transfer_summary(job.id)
+    if not _final_success(config, job.status, validation, transfer, require_verified_transfer=True):
+        return None, "job no longer has verified final import"
+    if item.item_type == "raw_rip_folder":
+        path, reason = _canonical_raw_rip_folder(config, Path(item.path))
+        if path is None:
+            return None, reason
+        members = []
+        for candidate in db.list_jobs():
+            folder, _ = _canonical_raw_rip_folder(config, Path(candidate.source_disc_path or candidate.disc_path))
+            if folder == path:
+                members.append(candidate)
+        eligible, reason = _folder_eligibility(db, config, path, members)
+        return (path, None) if eligible else (None, reason)
+    if item.item_type == "working_file":
+        path, reason = _canonical_working_file(config, Path(item.path))
+        if path is None:
+            return None, reason
+        eligible, reason = _eligibility(
+            config, path, True, True, False, config.cleanup.working_file_retention_days_after_import
+        )
+        return (path, None) if eligible else (None, reason)
+    if item.item_type == "raw_rip":
+        path, reason = _canonical_child(Path(item.path), [config.raw_rip_path], "raw rip")
+        if path is None:
+            return None, reason
+        eligible, reason = _eligibility(
+            config, path, True, True, False, config.cleanup.raw_rip_retention_days_after_import
+        )
+        return (path, None) if eligible else (None, reason)
+    return None, "unknown cleanup item type"
+
+
+def cleanup_previews(db, config: AppConfig, job_id: int | None = None) -> CleanupPlanSummary:
+    summary = CleanupPlanSummary(dry_run=False)
+    jobs = [job for job in db.list_jobs() if job_id is None or job.id == job_id]
+    for job in jobs:
+        validation = db.latest_validation_summary(job.id)
+        transfer = db.latest_transfer_summary(job.id)
+        if not _final_success(config, job.status, validation, transfer, require_verified_transfer=True):
+            summary.errors.append(f"job {job.id}: job has not completed verified final import")
+            continue
+        db.cancel_preview_jobs_for_job(job.id)
+        for row in db.source_file_payloads(job.id):
+            value = row.get("preview_path")
+            if not value:
+                continue
+            # Recheck all destructive conditions immediately before unlink.
+            current = db.get_job(job.id)
+            current_validation = db.latest_validation_summary(job.id)
+            current_transfer = db.latest_transfer_summary(job.id)
+            if current is None or db.has_cleanup_hold(job.id) or not _final_success(
+                config, current.status, current_validation, current_transfer, require_verified_transfer=True
+            ):
+                summary.errors.append(f"{value}: job is no longer eligible for preview cleanup")
+                continue
+            preview_root = Path(config.preview.output_path)
+            unavailable = config.mount_unavailable_for(preview_root)
+            if unavailable is not None:
+                summary.errors.append(f"{value}: mount unavailable: {unavailable}")
+                continue
+            path, reason = _canonical_child(Path(value), [preview_root], "preview")
+            if path is None:
+                summary.errors.append(f"{value}: {reason}")
+                continue
+            try:
+                # Resolve again after planning to catch path swaps.
+                path, reason = _canonical_child(Path(value), [preview_root], "preview")
+                if path is None:
+                    summary.errors.append(f"{value}: {reason}")
+                    continue
+                if path.exists():
+                    path.unlink()
+                db.clear_preview_metadata(int(row["id"]))
+                summary.deleted.append(str(path))
+            except Exception as exc:
+                summary.errors.append(f"{path}: {exc}")
+                db.audit("preview_cleanup_error", str(exc), job.id, {"source_file_id": row["id"], "preview_path": str(path)})
+    return summary
 
 
 def _folder_eligibility(db, config: AppConfig, folder: Path, members) -> tuple[bool, str]:

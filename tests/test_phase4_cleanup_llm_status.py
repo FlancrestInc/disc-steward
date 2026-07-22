@@ -6,7 +6,7 @@ import os
 import time
 from dataclasses import asdict
 
-from disc_steward.cleanup import execute_cleanup, plan_cleanup
+from disc_steward.cleanup import cleanup_previews, execute_cleanup, plan_cleanup
 from disc_steward.config import AppConfig, CleanupConfig, LLMConfig, MetadataConfig, config_from_dict
 from disc_steward.db import Database
 from disc_steward.llm import build_disc_job_packet, request_suggestions
@@ -327,11 +327,24 @@ def test_cleanup_plan_eligibility_after_successful_import(tmp_path):
     assert db.list_cleanup_eligibility(job_id)
 
 
+def test_live_legacy_raw_file_cleanup_deletes_eligible_raw_file(tmp_path):
+    config = _config(tmp_path)
+    config.cleanup.enabled = True
+    config.cleanup.dry_run = False
+    config.cleanup.delete_raw_rips = True
+    db, _job_id, _source_id, raw, _working, _final = _imported_job(tmp_path, config)
+
+    summary = execute_cleanup(db, config)
+
+    assert str(raw) in summary.deleted
+    assert not raw.exists()
+
+
 def test_folder_cleanup_requires_verified_transfer(tmp_path):
     config = _config(tmp_path)
     config.cleanup.delete_raw_rip_folders = True
     config.transfer_verify = "none"
-    db, _job_id, _source_id, raw, _working, _final = _imported_job(tmp_path, config)
+    db, _job_id, _source_id, raw, working, _final = _imported_job(tmp_path, config)
 
     summary = plan_cleanup(db, config)
 
@@ -344,12 +357,69 @@ def test_folder_cleanup_only_plans_folder_candidates(tmp_path):
     config = _config(tmp_path)
     config.cleanup.delete_raw_rip_folders = True
     config.cleanup.delete_working_files = True
-    db, _job_id, _source_id, raw, _working, _final = _imported_job(tmp_path, config)
+    db, _job_id, _source_id, raw, working, _final = _imported_job(tmp_path, config)
 
     summary = plan_cleanup(db, config)
 
-    assert [(item.item_type, item.path) for item in summary.eligible] == [("raw_rip_folder", str(raw.parent))]
-    assert all(item.item_type == "raw_rip_folder" for item in summary.ineligible)
+    assert {(item.item_type, item.path) for item in summary.eligible} == {
+        ("raw_rip_folder", str(raw.parent)),
+        ("working_file", str(working)),
+    }
+
+
+def test_folder_cleanup_deduplicates_shared_working_outputs(tmp_path):
+    config = _config(tmp_path)
+    config.cleanup.delete_raw_rip_folders = True
+    config.cleanup.delete_working_files = True
+    db, job_id, source_id, raw, working, _final = _imported_job(tmp_path, config)
+    sibling = db.upsert_job(raw.parent / "synthetic-split", "imported_to_jellyfin")
+    with db.connect() as conn:
+        conn.execute("UPDATE disc_jobs SET source_disc_path = ? WHERE id = ?", (str(raw.parent), sibling))
+    db.save_validation_summary(sibling, {
+        "passed": True,
+        "items": [{"source_file_id": source_id, "matched_output_path": str(working), "status": "passed"}],
+    }, True)
+    db.save_transfer_summary(sibling, {
+        "status": "imported_to_jellyfin",
+        "items": [{"source_file_id": source_id, "final_path": str(_final), "status": "placed", "verification": "size"}],
+    })
+
+    summary = plan_cleanup(db, config)
+
+    assert [item.path for item in summary.eligible if item.item_type == "working_file"] == [str(working)]
+
+
+def test_cleanup_previews_keeps_metadata_when_unlink_fails(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    db, job_id, source_id, _raw, _working, _final = _imported_job(tmp_path, config)
+    preview = Path(config.preview.output_path) / "job_1" / "source.mp4"
+    preview.parent.mkdir(parents=True)
+    preview.write_bytes(b"preview")
+    db.queue_preview_job(job_id, source_id, "source", str(preview), source_size_bytes=1, source_modified_time=1)
+    db.finish_preview_job(source_id, state="ready", preview_path=str(preview))
+    monkeypatch.setattr(Path, "unlink", lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("denied")))
+
+    summary = cleanup_previews(db, config, job_id)
+
+    assert summary.errors
+    assert db.source_file_payload(source_id)["preview_path"] == str(preview)
+
+
+def test_cleanup_previews_rejects_symlink(tmp_path):
+    config = _config(tmp_path)
+    db, job_id, source_id, _raw, _working, _final = _imported_job(tmp_path, config)
+    outside = tmp_path / "outside.mp4"
+    outside.write_bytes(b"preview")
+    cache = Path(config.preview.output_path)
+    cache.mkdir(parents=True)
+    link = cache / "escape.mp4"
+    link.symlink_to(outside)
+    db.queue_preview_job(job_id, source_id, "source", str(link), source_size_bytes=1, source_modified_time=1)
+
+    summary = cleanup_previews(db, config, job_id)
+
+    assert outside.exists()
+    assert summary.errors
 
 
 def test_folder_cleanup_requires_item_level_verified_transfer(tmp_path):

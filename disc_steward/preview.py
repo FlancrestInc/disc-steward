@@ -205,16 +205,18 @@ def _process_next_preview_job(db: Database, config: AppConfig, worker_name: str 
     source_file_id = int(queued["source_file_id"])
     source_path = Path(queued["source_path"])
     preview_path = Path(queued["preview_path"])
+    temp_path: Path | None = None
     try:
         if not source_path.exists():
             raise FileNotFoundError(f"Source file not found: {source_path}")
-        _run_preview_ffmpeg(config, source_path, preview_path)
-        db.finish_preview_job(
-            source_file_id,
-            state="ready",
-            generated_at=time.strftime("%Y-%m-%d %H:%M:%S"),
-            preview_path=str(preview_path),
-        )
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = tempfile.NamedTemporaryFile(prefix=preview_path.stem + ".", suffix=".pending.mp4", dir=preview_path.parent, delete=False)
+        handle.close()
+        temp_path = Path(handle.name)
+        _run_preview_ffmpeg(config, source_path, temp_path)
+        if not db.publish_preview_if_owned(source_file_id, temp_path, preview_path):
+            temp_path.unlink(missing_ok=True)
+            return True
         db.audit(
             "preview_complete",
             "Preview generation finished",
@@ -230,6 +232,9 @@ def _process_next_preview_job(db: Database, config: AppConfig, worker_name: str 
             int(queued["job_id"]),
             {"source_file_id": source_file_id, "preview_path": str(preview_path), "error": message},
         )
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
     return True
 
 

@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .config import load_config
-from .cleanup import execute_cleanup, plan_cleanup
+from .cleanup import cleanup_previews, execute_cleanup, plan_cleanup
 from .db import Database
 from .reports import generate_reports
 from .scanner import scan_completed_rips, watch_completed_rips
@@ -41,6 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     transfer.add_argument("--job-id", type=int, required=True)
     sub.add_parser("cleanup-plan", parents=[shared], help="Plan cleanup eligibility without changing files")
     sub.add_parser("cleanup", parents=[shared], help="Execute configured cleanup; disabled and dry-run by default")
+    previews = sub.add_parser("cleanup-previews", parents=[shared], help="Remove safely tracked previews for verified completed jobs")
+    previews.add_argument("--job-id", type=int)
     sub.add_parser("status", parents=[shared], help="Show pipeline status summary")
     automation = sub.add_parser("automation-worker", parents=[shared], help="Run the durable automation queue worker")
     automation.add_argument("--poll-interval", type=float, default=1.0, help="Seconds to sleep when the queue is empty")
@@ -136,6 +138,12 @@ def main(argv: list[str] | None = None) -> int:
         for error in summary.errors:
             print(f"error: {error}")
         return 0 if not summary.errors or config.cleanup.dry_run else 2
+    if args.command == "cleanup-previews":
+        summary = cleanup_previews(db, config, job_id=args.job_id)
+        print(f"preview cleanup: deleted={len(summary.deleted)} errors={len(summary.errors)}")
+        for error in summary.errors:
+            print(f"error: {error}")
+        return 0 if not summary.errors else 2
     if args.command == "status":
         print(format_status_summary(build_status_summary(db, config)))
         return 0

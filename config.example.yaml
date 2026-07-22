@@ -103,17 +103,35 @@ jellyfin:
   refresh_after_import: false
   library_ids: []
 
+preview:
+  enabled: true
+  output_path: /mnt/Barnabas/data2/media-pipeline/09_preview_cache
+  worker_enabled: true
+  worker_name: barnabas
+  max_concurrent_jobs: 1
+  ffmpeg_path: ffmpeg
+  encoder: h264_nvenc
+  fallback_encoder: libx264
+  height: 480
+  quality: 28
+  auto_generate: true
+  clip_duration_seconds: 120
+  delete_after_transfer: true
+
 cleanup:
-  enabled: false
-  dry_run: true
-  raw_rip_retention_days_after_import: 14
-  working_file_retention_days_after_import: 7
+  enabled: true
+  dry_run: false
+  raw_rip_retention_days_after_import: 0
+  working_file_retention_days_after_import: 0
   delete_raw_rips: false
-  delete_raw_rip_folders: false
-  delete_working_files: false
+  delete_raw_rip_folders: true
+  delete_working_files: true
   archive_raw_rips_to_eddy: false
   raw_rip_archive_path: ""
   require_successful_jellyfin_import: true
+
+# This example enables immediate cleanup after verification. Copy it only after
+# checking mounts and backups; runtime defaults remain non-destructive.
 
 metadata:
   enabled: false

@@ -7,7 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Callable
 
-from .cleanup import execute_cleanup
+from .cleanup import cleanup_previews, execute_cleanup
 from .config import AppConfig
 from .jellyfin import refresh_after_import
 from .models import TransferConflict, TransferItemResult, TransferSummary
@@ -73,7 +73,7 @@ def transfer_job_to_eddy(
     if (
         summary.status == "imported_to_jellyfin"
         and config.cleanup.enabled
-        and config.cleanup.delete_raw_rip_folders
+        and (config.cleanup.delete_raw_rip_folders or config.cleanup.delete_raw_rips or config.cleanup.delete_working_files)
         and not config.cleanup.dry_run
     ):
         try:
@@ -87,9 +87,19 @@ def transfer_job_to_eddy(
             db.audit("cleanup_error", warning, job_id, {"errors": cleanup_errors})
             db.save_transfer_summary(job_id, _summary_dict(summary))
     if summary.status == "imported_to_jellyfin" and config.preview.delete_after_transfer:
-        deleted = db.delete_preview_files_for_job(job_id)
-        if deleted:
-            db.audit("preview_cleanup", f"Deleted {deleted} preview file(s) after transfer", job_id, {"deleted": deleted})
+        try:
+            preview_cleanup = cleanup_previews(db, config, job_id=job_id)
+            preview_errors = preview_cleanup.errors
+        except Exception as exc:
+            preview_cleanup = None
+            preview_errors = [str(exc)]
+        if preview_errors:
+            warning = f"Preview cleanup warning: {'; '.join(preview_errors)}"
+            summary.warnings.append(warning)
+            db.audit("preview_cleanup_error", warning, job_id, {"errors": preview_errors})
+            db.save_transfer_summary(job_id, _summary_dict(summary))
+        elif preview_cleanup and preview_cleanup.deleted:
+            db.audit("preview_cleanup", f"Deleted {len(preview_cleanup.deleted)} preview file(s) after transfer", job_id, {"deleted": len(preview_cleanup.deleted)})
     if summary.status == "imported_to_jellyfin" and config.jellyfin.refresh_after_import:
         jellyfin_result = refresh_after_import(db, job_id, config.jellyfin)
         if jellyfin_result.get("status") == "warning":

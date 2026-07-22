@@ -860,15 +860,62 @@ class Database:
             conn.execute(
                 """
                 UPDATE source_files
-                SET preview_status = ?,
-                    preview_error = ?,
+                SET preview_status = ?, preview_error = ?,
                     preview_generated_at = COALESCE(?, preview_generated_at),
-                    preview_path = COALESCE(?, preview_path),
-                    updated_at = CURRENT_TIMESTAMP
+                    preview_path = COALESCE(?, preview_path), updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 (state, error, generated_at, preview_path, source_file_id),
             )
+
+    def publish_preview_if_owned(self, source_file_id: int, temp_path: Path, preview_path: Path) -> bool:
+        """Publish only while this worker still owns a running preview row."""
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT state FROM preview_jobs WHERE source_file_id = ?", (source_file_id,)).fetchone()
+            if row is None or row["state"] != "running":
+                conn.commit()
+                return False
+            temp_path.replace(preview_path)
+            conn.execute(
+                """UPDATE preview_jobs SET state = 'ready', last_error = NULL, finished_at = CURRENT_TIMESTAMP,
+                   updated_at = CURRENT_TIMESTAMP WHERE source_file_id = ? AND state = 'running'""",
+                (source_file_id,),
+            )
+            conn.execute(
+                """UPDATE source_files SET preview_status = 'ready', preview_error = NULL,
+                   preview_generated_at = CURRENT_TIMESTAMP, preview_path = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (str(preview_path), source_file_id),
+            )
+            conn.commit()
+            return True
+
+    def cancel_preview_jobs_for_job(self, job_id: int) -> int:
+        """Cancel queued or running work without erasing tracked preview metadata."""
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """UPDATE preview_jobs SET state = 'cancelled', last_error = 'cancelled for cleanup',
+                   finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                   WHERE job_id = ? AND state IN ('queued', 'running')""",
+                (job_id,),
+            )
+            conn.execute(
+                """UPDATE source_files SET preview_status = 'missing', preview_error = 'cancelled for cleanup',
+                   updated_at = CURRENT_TIMESTAMP WHERE job_id = ? AND preview_status IN ('queued', 'processing')""",
+                (job_id,),
+            )
+            return cursor.rowcount
+
+    def clear_preview_metadata(self, source_file_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """UPDATE source_files SET preview_status = 'missing', preview_path = NULL, preview_error = NULL,
+                   preview_generated_at = NULL, preview_source_modified_time = NULL,
+                   preview_source_size_bytes = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+                (source_file_id,),
+            )
+            conn.execute("DELETE FROM preview_jobs WHERE source_file_id = ?", (source_file_id,))
 
     def reset_stuck_preview_jobs(self) -> int:
         with self.connect() as conn:

@@ -6,6 +6,7 @@ from disc_steward.config import AppConfig
 from disc_steward.db import Database
 from disc_steward.models import AudioStream, ScannedFile, VideoInfo
 from disc_steward import preview as preview_worker
+from disc_steward.cleanup import cleanup_previews
 from disc_steward import scanner, web
 
 
@@ -92,7 +93,9 @@ def test_preview_worker_generates_and_marks_ready(tmp_path, monkeypatch):
     queued_row = db.preview_job(source_id)
 
     assert processed is True
-    assert written == [preview_path]
+    assert len(written) == 1
+    assert written[0] != preview_path
+    assert written[0].suffix == ".mp4"
     assert preview_path.exists()
     assert payload is not None
     assert payload["preview_status"] == "ready"
@@ -102,6 +105,46 @@ def test_preview_worker_generates_and_marks_ready(tmp_path, monkeypatch):
     assert queued_row is not None
     assert queued_row["state"] == "ready"
     assert queued_row["last_error"] is None
+
+
+def test_finish_preview_job_updates_source_metadata(tmp_path):
+    db, _config, job_id, source_id, _media, preview_path = _db_with_source(tmp_path)
+    db.queue_preview_job(job_id, source_id, "source", str(preview_path), source_size_bytes=1, source_modified_time=1)
+
+    db.finish_preview_job(source_id, state="failed", error="encoder failed")
+
+    payload = db.source_file_payload(source_id)
+    assert payload["preview_status"] == "failed"
+    assert payload["preview_error"] == "encoder failed"
+
+
+def test_cleanup_previews_rejects_tracked_path_outside_preview_root(tmp_path):
+    db, config, job_id, source_id, _media, _preview_path = _db_with_source(tmp_path)
+    outside = tmp_path / "outside.mp4"
+    outside.write_bytes(b"preview")
+    db.queue_preview_job(job_id, source_id, "source", str(outside), source_size_bytes=1, source_modified_time=1)
+
+    summary = cleanup_previews(db, config, job_id=job_id)
+
+    assert outside.exists()
+    assert summary.errors
+    assert db.source_file_payload(source_id)["preview_path"] == str(outside)
+
+
+def test_cancelled_preview_worker_cannot_publish_temp_file(tmp_path, monkeypatch):
+    db, config, job_id, source_id, media, preview_path = _db_with_source(tmp_path)
+    db.queue_preview_job(job_id, source_id, str(media), str(preview_path), source_size_bytes=media.stat().st_size, source_modified_time=media.stat().st_mtime)
+
+    def cancel_after_encode(_config, _source, output):
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"preview")
+        db.cancel_preview_jobs_for_job(job_id)
+
+    monkeypatch.setattr(preview_worker, "_run_preview_ffmpeg", cancel_after_encode)
+
+    assert preview_worker._process_next_preview_job(db, config) is True
+    assert not preview_path.exists()
+    assert db.source_file_payload(source_id)["preview_status"] != "ready"
 
 
 def test_review_page_uses_browser_video_preview_when_ready(tmp_path):

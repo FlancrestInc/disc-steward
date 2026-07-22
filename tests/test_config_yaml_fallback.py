@@ -5,6 +5,16 @@ from pathlib import Path
 from disc_steward import config as config_module
 
 
+def test_example_config_documents_preview_cleanup_but_keeps_it_disabled_by_default() -> None:
+    example = Path(__file__).parents[1] / "config.example.yaml"
+    text = example.read_text(encoding="utf-8")
+
+    assert "preview:" in text
+    assert "delete_after_transfer: true" in text
+    assert "enabled: true" in text
+    assert "dry_run: false" in text
+
+
 def test_load_config_without_pyyaml_supports_project_config_subset(tmp_path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
