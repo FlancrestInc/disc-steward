@@ -230,7 +230,8 @@ class Database:
                     event_type TEXT NOT NULL,
                     message TEXT NOT NULL,
                     payload_json TEXT,
-                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    dismissed INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS automation_jobs (
                     job_id INTEGER PRIMARY KEY REFERENCES disc_jobs(id) ON DELETE CASCADE,
@@ -362,6 +363,7 @@ class Database:
             self._ensure_column(conn, "source_files", "preview_source_size_bytes", "INTEGER")
             self._ensure_column(conn, "ignored_disc_paths", "job_id", "INTEGER")
             self._ensure_column(conn, "ignored_disc_paths", "disc_title", "TEXT")
+            self._ensure_column(conn, "audit_log", "dismissed", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "ignored_disc_paths", "status", "TEXT NOT NULL DEFAULT 'deleted'")
             conn.execute("UPDATE disc_jobs SET source_disc_path = disc_path WHERE source_disc_path IS NULL")
 
@@ -1579,7 +1581,7 @@ class Database:
     def list_audit_events(self, job_id: int) -> list[dict]:
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT id, event_type, message, payload_json, created_at FROM audit_log WHERE job_id = ? ORDER BY id",
+                "SELECT id, event_type, message, payload_json, created_at, dismissed FROM audit_log WHERE job_id = ? ORDER BY id",
                 (job_id,),
             ).fetchall()
         return [
@@ -1589,6 +1591,7 @@ class Database:
                 "message": row["message"],
                 "payload": json.loads(row["payload_json"] or "{}"),
                 "created_at": row["created_at"],
+                "dismissed": bool(row["dismissed"]),
             }
             for row in rows
         ]
@@ -1596,9 +1599,21 @@ class Database:
     def audit(self, event_type: str, message: str, job_id: int | None = None, payload: dict | None = None) -> None:
         with self.connect() as conn:
             conn.execute(
-                "INSERT INTO audit_log (job_id, event_type, message, payload_json) VALUES (?, ?, ?, ?)",
+                "INSERT INTO audit_log (job_id, event_type, message, payload_json, dismissed) VALUES (?, ?, ?, ?, 0)",
                 (job_id, event_type, message, json.dumps(payload or {}, ensure_ascii=False)),
             )
+
+    def clear_recent_errors(self) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE audit_log
+                SET dismissed = 1
+                WHERE dismissed = 0
+                  AND (event_type LIKE '%error%' OR event_type LIKE '%failed%')
+                """
+            )
+            return cursor.rowcount
 
     def save_subtitle_plan(self, source_file_id: int, plan: dict) -> None:
         with self.connect() as conn:
@@ -1671,12 +1686,12 @@ class Database:
         with self.connect() as conn:
             if job_id is None:
                 rows = conn.execute(
-                    "SELECT id, job_id, event_type, message, payload_json, created_at FROM audit_log ORDER BY id"
+                    "SELECT id, job_id, event_type, message, payload_json, created_at, dismissed FROM audit_log ORDER BY id"
                 ).fetchall()
             else:
                 rows = conn.execute(
                     """
-                    SELECT id, job_id, event_type, message, payload_json, created_at
+                    SELECT id, job_id, event_type, message, payload_json, created_at, dismissed
                     FROM audit_log
                     WHERE job_id = ?
                     ORDER BY id
@@ -1686,6 +1701,7 @@ class Database:
         events = []
         for row in rows:
             event = {key: row[key] for key in row.keys() if key != "payload_json"}
+            event["dismissed"] = bool(event["dismissed"])
             event["payload"] = json.loads(row["payload_json"] or "{}")
             events.append(event)
         return events

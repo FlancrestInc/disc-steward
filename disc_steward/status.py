@@ -22,7 +22,7 @@ def build_status_summary(db, config: AppConfig) -> dict:
     cleanup_items = db.list_cleanup_eligibility()
     for job in jobs:
         for event in db.list_audit_events(job.id)[-5:]:
-            if "error" in event["event_type"] or "failed" in event["event_type"]:
+            if ("error" in event["event_type"] or "failed" in event["event_type"]) and not event.get("dismissed", False):
                 recent_errors.append(event)
     summary = {
         "jobs_discovered": len(jobs),

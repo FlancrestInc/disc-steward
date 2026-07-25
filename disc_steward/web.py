@@ -142,6 +142,9 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        if path == "/clear-errors":
+            self._redirect(handle_dashboard_action(self.database, "clear-errors").removeprefix("redirect:"))
+            return
         if path == "/ignored/unignore":
             form = self._read_form()
             try:
@@ -658,6 +661,13 @@ def handle_job_action(db: Database, config: AppConfig, job_id: int, action: str,
         db.audit("reopen_review", "Reopened review", job_id)
         return "reopened"
     raise ValueError(f"Unknown action: {action}")
+
+
+def handle_dashboard_action(db: Database, action: str) -> str:
+    if action == "clear-errors":
+        db.clear_recent_errors()
+        return "redirect:/"
+    raise ValueError(f"Unknown dashboard action: {action}")
 
 
 def handle_ignored_action(db: Database, config: AppConfig, action: str, form: dict[str, str]) -> str:
@@ -1790,10 +1800,19 @@ def render_dashboard(db: Database, config: AppConfig) -> str:
     error_html = ""
     if recent_errors:
         error_html = "".join(
-            f"<li><strong>Job {escape(str(event.get('job_id', '?')))}</strong> · {escape(str(event.get('event_type', 'event')))} · {escape(str(event.get('message', '')))}</li>"
+            f"<li><strong>Job {escape(str(event.get('job_id', '?')))}</strong> · {escape(str(event.get('event_type', 'event')))} · "
+            f"<time datetime='{escape(str(event.get('created_at', '')))}'>{escape(str(event.get('created_at', '')))}</time> · "
+            f"{escape(str(event.get('message', '')))}</li>"
             for event in recent_errors[-5:]
         )
-        error_html = f"<section class='dashboard-notes'><h2>Recent errors</h2><ul>{error_html}</ul></section>"
+        error_html = (
+            "<section class='dashboard-notes'>"
+            "<div class='dashboard-notes-header'><h2>Recent errors</h2>"
+            '<form method="post" action="/clear-errors" class="inline-form">'
+            '<button class="ds-button" type="submit">Clear errors</button>'
+            "</form></div>"
+            f"<ul>{error_html}</ul></section>"
+        )
     return f"""
     <section class="dashboard-summary">
       <div class="dashboard-summary-header">

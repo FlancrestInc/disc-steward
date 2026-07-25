@@ -549,6 +549,46 @@ def test_homepage_renders_dashboard_lanes_and_cards(tmp_path):
     assert "DISC3" in html
 
 
+def test_clear_recent_errors_dismisses_only_error_events_and_preserves_rows(tmp_path):
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    disc = tmp_path / "DISC"
+    disc.mkdir()
+    job_id = db.upsert_job(disc, "review_needed")
+    db.audit("automation_failed", "Pipeline failed", job_id)
+    db.audit("scan", "Scan completed", job_id)
+
+    cleared = db.clear_recent_errors()
+
+    assert cleared == 1
+    events = db.list_audit_events(job_id)
+    assert len(events) == 2
+    assert events[0]["dismissed"] is True
+    assert events[1]["dismissed"] is False
+
+
+def test_dashboard_recent_errors_render_timestamps_and_clear_action(tmp_path):
+    config = _config(tmp_path)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+    disc = tmp_path / "DISC"
+    disc.mkdir()
+    job_id = db.upsert_job(disc, "review_needed")
+    db.audit("automation_failed", "Pipeline failed", job_id)
+    with db.connect() as conn:
+        conn.execute("UPDATE audit_log SET created_at = ?", ("2026-07-25 12:34:56",))
+
+    html = web.render_job_list(db, config)
+
+    assert "2026-07-25 12:34:56" in html
+    assert 'action="/clear-errors"' in html
+    assert ">Clear errors</button>" in html
+
+    assert web.handle_dashboard_action(db, "clear-errors") == "redirect:/"
+    assert "Pipeline failed" not in web.render_job_list(db, config)
+    assert db.list_audit_events(job_id)[0]["dismissed"] is True
+
+
 def test_metadata_lookup_strip_shows_last_lookup_warning(tmp_path):
     config = _config(tmp_path)
     db, job_id, _source_id, _media = _job_with_source(tmp_path, config)
