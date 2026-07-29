@@ -64,18 +64,20 @@ cp config.example.yaml config.yaml
 
 Install `ffprobe` from FFmpeg and make sure it is on `PATH`, or set `ffprobe_path` in `config.yaml`.
 
-For image-based Japanese subtitles (PGS/VobSub), install Tesseract and its Japanese and
-English language data on the controller host running Disc Steward (Gospel in the recommended
-deployment):
+For image-based Japanese subtitles (PGS/VobSub), the Barnabas `disc-steward-ffmpeg` worker image
+includes Tesseract and its Japanese and English language data. Rebuild that image from
+`deploy/docker/disc-steward-ffmpeg/Dockerfile` when updating the worker:
 
 ```bash
-sudo apt-get install tesseract-ocr tesseract-ocr-eng tesseract-ocr-jpn
+# Run from the Disc Steward repository root:
+ssh flan@barnabas.lan 'docker build -t disc-steward-ffmpeg:bookworm -' \\
+  < deploy/docker/disc-steward-ffmpeg/Dockerfile
 ```
 
 With `subtitle_planning.image_subtitle_ocr_backend: auto`, Japanese-tagged image subtitle
-streams use Tesseract with `jpn+eng`; other image streams continue to use RapidOCR. Set the
-backend to `tesseract` to force it for every image subtitle stream, or `rapidocr` to retain the
-previous behavior.
+streams use the Barnabas worker's Tesseract with `jpn+eng`; other image streams continue to use
+RapidOCR. Set the backend to `tesseract` to force it for every image subtitle stream, or `rapidocr`
+to retain the previous behavior.
 
 ## Commands
 
