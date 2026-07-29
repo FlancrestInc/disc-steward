@@ -17,6 +17,7 @@ from .models import ScannedFile, SubtitleStream
 
 TEXT_SUBTITLE_CODECS = {"subrip", "srt", "webvtt", "mov_text", "ass", "ssa"}
 IMAGE_SUBTITLE_CODECS = {"hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub"}
+JAPANESE_LANGUAGE_CODES = {"ja", "jpn", "jp", "japanese"}
 
 _SANITIZE_RE = re.compile(r"[<>:\"/\\|?*\x00-\x1f]")
 _SRT_TIMING_RE = re.compile(r"^\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}$")
@@ -51,14 +52,19 @@ def extract_subtitle_sidecars(
     ocr_engine: Any | None = None,
     convert_image_subtitles_to_srt: bool = True,
     ffprobe_runner: Callable[[list[str]], str] | None = None,
+    ignored_source_stream_indexes: set[int] | None = None,
+    ocr_backend: str = "auto",
+    tesseract_path: str = "tesseract",
 ) -> list[SubtitleSidecar]:
     output_dir.mkdir(parents=True, exist_ok=True)
     streams = list(source.subtitle_streams)
     if not convert_image_subtitles_to_srt and any((stream.codec or "").lower() in IMAGE_SUBTITLE_CODECS for stream in streams):
         raise RuntimeError("image subtitle OCR must be enabled for strict SRT sidecars")
-    active_ocr_engine = ocr_engine
     results: list[SubtitleSidecar] = []
+    ignored = ignored_source_stream_indexes or set()
     for ordinal, stream in enumerate(streams):
+        if stream.index in ignored:
+            continue
         output_path = output_dir / build_subtitle_sidecar_name(video_name, stream, ordinal)
         codec = (stream.codec or "").lower()
         if codec in TEXT_SUBTITLE_CODECS:
@@ -83,8 +89,11 @@ def extract_subtitle_sidecars(
             continue
         if codec in IMAGE_SUBTITLE_CODECS:
             warnings: list[str] = []
-            if active_ocr_engine is None:
-                active_ocr_engine = _create_ocr_engine()
+            active_ocr_engine = ocr_engine or _create_ocr_engine(
+                stream.language,
+                backend=ocr_backend,
+                tesseract_path=tesseract_path,
+            )
             if _extract_image_subtitle(
                 ffmpeg_path,
                 ffprobe_path,
@@ -114,10 +123,52 @@ def extract_subtitle_sidecars(
     return results
 
 
-def _create_ocr_engine() -> Any:
+def _create_ocr_engine(language: str | None, *, backend: str, tesseract_path: str) -> Any:
+    normalized_backend = (backend or "auto").strip().lower()
+    if normalized_backend not in {"auto", "rapidocr", "tesseract"}:
+        raise ValueError(f"unsupported subtitle OCR backend: {backend}")
+    if normalized_backend == "tesseract" or (
+        normalized_backend == "auto" and (language or "").strip().lower() in JAPANESE_LANGUAGE_CODES
+    ):
+        return TesseractOCR(tesseract_path=tesseract_path, language="jpn+eng")
     if RapidOCR is None:
         raise RuntimeError("rapidocr-onnxruntime is required to OCR image subtitle streams")
     return RapidOCR()
+
+
+class TesseractOCR:
+    """Small callable adapter for Tesseract's UTF-8 text output."""
+
+    def __init__(self, *, tesseract_path: str, language: str) -> None:
+        self.tesseract_path = tesseract_path
+        self.language = language
+
+    def __call__(self, image_path: Path) -> list[list[tuple[list[list[int]], str, float]]]:
+        # Keep the arguments explicit: Tesseract emits UTF-8 text on stdout.
+        command = [
+            self.tesseract_path,
+            str(image_path),
+            "stdout",
+            "--oem",
+            "1",
+            "--psm",
+            "6",
+            "-l",
+            self.language,
+        ]
+        try:
+            result = subprocess.run(command, check=True, capture_output=True, text=True, encoding="utf-8")
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                f"Tesseract is required for Japanese image subtitles but was not found: {self.tesseract_path}"
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or "").strip()
+            raise RuntimeError(f"Tesseract subtitle OCR failed{': ' + detail if detail else ''}") from exc
+        text = result.stdout.strip()
+        if not text:
+            return [None]  # type: ignore[list-item]
+        return [[([[0, 0], [1, 0], [1, 1], [0, 1]], line, 1.0) for line in text.splitlines() if line.strip()]]
 
 
 def _extract_text_subtitle(
@@ -171,7 +222,7 @@ def _extract_image_subtitle(
     width = source.video.width or 720
     height = source.video.height or 480
     cues: list[tuple[float, float, str]] = []
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(dir=output_path.parent) as tmpdir:
         tmp = Path(tmpdir)
         for chunk_start_index in range(0, len(packets), chunk_size):
             chunk_spans = spans[chunk_start_index : chunk_start_index + chunk_size]
@@ -323,7 +374,7 @@ def _render_subtitle_frame_sequence(
         "-i",
         source_path,
         "-filter_complex",
-        f"[0:v][1:s:{subtitle_ordinal}]overlay=shortest=1:eof_action=endall,select='{select_expr}',setpts=N/FRAME_RATE/TB",
+        f"[0:v][1:s:{subtitle_ordinal}]overlay=shortest=0:eof_action=pass,select='{select_expr}',setpts=N/FRAME_RATE/TB",
         "-vsync",
         "vfr",
         str(output_dir / "frame_%05d.png"),

@@ -104,6 +104,8 @@ class SubtitlePlanningConfig:
     convert_image_subtitles_to_srt: bool = True
     preserve_ass_for_anime: bool = True
     add_srt_fallback_for_ass: bool = True
+    image_subtitle_ocr_backend: str = "auto"
+    tesseract_path: str = "tesseract"
 
 
 @dataclass
@@ -603,6 +605,8 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
             convert_image_subtitles_to_srt=bool(subtitle_planning.get("convert_image_subtitles_to_srt", True)),
             preserve_ass_for_anime=bool(subtitle_planning.get("preserve_ass_for_anime", True)),
             add_srt_fallback_for_ass=bool(subtitle_planning.get("add_srt_fallback_for_ass", True)),
+            image_subtitle_ocr_backend=str(subtitle_planning.get("image_subtitle_ocr_backend", "auto") or "auto"),
+            tesseract_path=str(subtitle_planning.get("tesseract_path", "tesseract") or "tesseract"),
         ),
         japanese_anime=JapaneseAnimeConfig(
             preserve_unicode_metadata=bool(japanese_anime.get("preserve_unicode_metadata", True)),

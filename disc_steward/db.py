@@ -130,6 +130,7 @@ class Database:
                     sort_order INTEGER,
                     encoding_profile TEXT NOT NULL DEFAULT '',
                     subtitle_policy TEXT NOT NULL DEFAULT '',
+                    ignored_subtitle_streams_json TEXT NOT NULL DEFAULT '[]',
                     generated_final_path TEXT,
                     notes TEXT,
                     warnings_json TEXT NOT NULL DEFAULT '[]',
@@ -361,6 +362,7 @@ class Database:
             self._ensure_column(conn, "source_files", "preview_generated_at", "TEXT")
             self._ensure_column(conn, "source_files", "preview_source_modified_time", "REAL")
             self._ensure_column(conn, "source_files", "preview_source_size_bytes", "INTEGER")
+            self._ensure_column(conn, "file_reviews", "ignored_subtitle_streams_json", "TEXT NOT NULL DEFAULT '[]'")
             self._ensure_column(conn, "ignored_disc_paths", "job_id", "INTEGER")
             self._ensure_column(conn, "ignored_disc_paths", "disc_title", "TEXT")
             self._ensure_column(conn, "audit_log", "dismissed", "INTEGER NOT NULL DEFAULT 0")
@@ -1295,6 +1297,7 @@ class Database:
                     sort_order=row["sort_order"],
                     encoding_profile=row["encoding_profile"],
                     subtitle_policy=row["subtitle_policy"],
+                    ignored_subtitle_streams=json.loads(row["ignored_subtitle_streams_json"] or "[]"),
                     generated_final_path=row["generated_final_path"],
                     notes=row["notes"],
                     warnings=json.loads(row["warnings_json"] or "[]"),
@@ -1324,8 +1327,8 @@ class Database:
                     source_file_id, include_in_work_order, role, content_type, final_display_name, final_filename,
                     original_title, translated_title, romanized_title, imdb_id, tmdb_id, tvdb_id, anidb_id,
                     anilist_id, mal_id, extra_type, season_number, episode_number, sort_order, encoding_profile,
-                    subtitle_policy, generated_final_path, notes, warnings_json, conflicts_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    subtitle_policy, ignored_subtitle_streams_json, generated_final_path, notes, warnings_json, conflicts_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_file_id) DO UPDATE SET
                     include_in_work_order=excluded.include_in_work_order,
                     role=excluded.role,
@@ -1347,6 +1350,7 @@ class Database:
                     sort_order=excluded.sort_order,
                     encoding_profile=excluded.encoding_profile,
                     subtitle_policy=excluded.subtitle_policy,
+                    ignored_subtitle_streams_json=excluded.ignored_subtitle_streams_json,
                     generated_final_path=excluded.generated_final_path,
                     notes=excluded.notes,
                     warnings_json=excluded.warnings_json,
@@ -1374,6 +1378,7 @@ class Database:
                     review.sort_order,
                     review.encoding_profile,
                     review.subtitle_policy,
+                    json.dumps(sorted(set(review.ignored_subtitle_streams)), ensure_ascii=False),
                     review.generated_final_path,
                     review.notes,
                     json.dumps(review.warnings, ensure_ascii=False),
@@ -1626,6 +1631,13 @@ class Database:
                     updated_at=CURRENT_TIMESTAMP
                 """,
                 (source_file_id, json.dumps(plan, ensure_ascii=False)),
+            )
+
+    def dismiss_audit_event(self, event_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE audit_log SET dismissed = 1 WHERE id = ?",
+                (event_id,),
             )
 
     def get_subtitle_plan(self, source_file_id: int) -> dict | None:

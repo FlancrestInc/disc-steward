@@ -18,8 +18,10 @@ def generate_subtitle_plan(
     subtitle_policy: str,
     preferred_format: str = "srt",
     preserve_original_subtitles: bool = True,
+    ignored_source_stream_indexes: set[int] | None = None,
 ) -> SubtitlePlan:
-    subtitles = source.subtitle_streams
+    ignored = ignored_source_stream_indexes or set()
+    subtitles = [stream for stream in source.subtitle_streams if stream.index not in ignored]
     audio_languages = {_norm(stream.language) for stream in source.audio_streams if stream.language}
     japanese_or_anime = content_type == "anime" or bool(audio_languages & JAPANESE_LANGUAGE_CODES)
     image_subtitles = [stream for stream in subtitles if _codec(stream) in IMAGE_SUBTITLE_CODECS]
@@ -41,6 +43,8 @@ def generate_subtitle_plan(
         forced_subtitle_candidates=[_stream_candidate(stream) for stream in forced],
         japanese_or_anime=japanese_or_anime,
     )
+    if ignored:
+        warnings.append("Ignored subtitle stream(s): " + ", ".join(str(index) for index in sorted(ignored)))
 
     for stream in subtitles:
         if stream.language is None:

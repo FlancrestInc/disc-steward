@@ -191,6 +191,70 @@ def test_extract_text_subtitle_sidecar_does_not_require_ocr_runtime(tmp_path, mo
     assert (tmp_path / "Movie.sub01.eng.subrip.srt").read_text(encoding="utf-8").startswith("1\n")
 
 
+def test_extract_subtitle_sidecars_preserves_every_text_track(tmp_path):
+    source = _source(
+        tmp_path / "movie.mkv",
+        subtitles=[
+            SubtitleStream(index=6, codec="subrip", language="eng"),
+            SubtitleStream(index=7, codec="subrip", language="spa"),
+        ],
+    )
+    seen_streams: list[str] = []
+
+    def fake_ffmpeg(command: list[str]) -> None:
+        stream = command[command.index("-map") + 1]
+        seen_streams.append(stream)
+        language = "English" if stream == "0:6" else "Spanish"
+        Path(command[-1]).write_text(
+            f"1\n00:00:00,000 --> 00:00:01,000\n{language}\n\n",
+            encoding="utf-8",
+        )
+
+    results = extract_subtitle_sidecars("ffmpeg", "ffprobe", source, tmp_path, "Movie.mkv", ffmpeg_runner=fake_ffmpeg)
+
+    assert seen_streams == ["0:6", "0:7"]
+    assert [result.output_name for result in results] == [
+        "Movie.sub01.eng.subrip.srt",
+        "Movie.sub02.spa.subrip.srt",
+    ]
+    assert (tmp_path / "Movie.sub01.eng.subrip.srt").read_text(encoding="utf-8").find("English") >= 0
+    assert (tmp_path / "Movie.sub02.spa.subrip.srt").read_text(encoding="utf-8").find("Spanish") >= 0
+
+
+def test_extract_subtitle_sidecars_skips_ignored_stream_but_preserves_source_ordinal(tmp_path):
+    source = _source(
+        tmp_path / "movie.mkv",
+        subtitles=[
+            SubtitleStream(index=6, codec="subrip", language="eng"),
+            SubtitleStream(index=8, codec="dvd_subtitle", language="spa"),
+            SubtitleStream(index=10, codec="subrip", language="eng"),
+        ],
+    )
+    seen_streams: list[str] = []
+
+    def fake_ffmpeg(command: list[str]) -> None:
+        if "-map" in command:
+            seen_streams.append(command[command.index("-map") + 1])
+            Path(command[-1]).write_text("1\n00:00:00,000 --> 00:00:01,000\nSubtitle\n\n", encoding="utf-8")
+
+    results = extract_subtitle_sidecars(
+        "ffmpeg",
+        "ffprobe",
+        source,
+        tmp_path,
+        "Movie.mkv",
+        ffmpeg_runner=fake_ffmpeg,
+        ignored_source_stream_indexes={8},
+    )
+
+    assert seen_streams == ["0:6", "0:10"]
+    assert [result.source_stream_index for result in results] == [6, 10]
+    assert [result.output_name for result in results] == [
+        "Movie.sub01.eng.subrip.srt",
+        "Movie.sub03.eng.subrip.srt",
+    ]
+
+
 def test_extract_subtitle_sidecars_rejects_disabled_image_ocr(tmp_path, monkeypatch):
     source = _source(
         tmp_path / "movie.mkv",
@@ -402,8 +466,36 @@ def test_image_subtitle_render_is_bounded_to_synthetic_clip(tmp_path):
         source_offset=10.0,
     )
 
-    filter_index = commands[0].index("-filter_complex") + 1
-    assert "shortest=1" in commands[0][filter_index]
+    duration_input = commands[0][commands[0].index("-i") + 1]
+    assert duration_input.endswith("r=2:d=5.000")
+
+
+def test_image_subtitle_render_keeps_synthetic_clip_alive_after_subtitle_eof(tmp_path):
+    commands: list[list[str]] = []
+
+    def fake_ffmpeg(command: list[str]) -> None:
+        commands.append(command)
+        (tmp_path / "frame_00001.png").write_bytes(b"png")
+
+    subtitle_extraction._render_subtitle_frame_sequence(
+        "ffmpeg",
+        "movie.mkv",
+        0,
+        720,
+        480,
+        189.044,
+        2,
+        [4, 12, 19],
+        tmp_path,
+        ffmpeg_runner=fake_ffmpeg,
+        source_offset=67.468,
+    )
+
+    filter_value = commands[0][commands[0].index("-filter_complex") + 1]
+    assert "shortest=0" in filter_value
+    assert "eof_action=pass" in filter_value
+    assert "shortest=1" not in filter_value
+    assert "eof_action=endall" not in filter_value
 
 
 def test_subtitle_validation_checks_selected_plan_with_warnings(tmp_path):
@@ -449,3 +541,91 @@ def test_job_validation_fails_when_expected_image_sidecar_is_missing(tmp_path):
 
     assert summary.passed is False
     assert any("missing subtitle sidecar" in error for error in summary.items[0].errors)
+
+
+def test_auto_backend_uses_tesseract_for_japanese_image_subtitles(tmp_path, monkeypatch):
+    source = _source(
+        tmp_path / "anime.mkv",
+        subtitles=[SubtitleStream(index=4, codec="dvd_subtitle", language="jpn")],
+    )
+    created: list[tuple[str, str]] = []
+
+    class FakeTesseract:
+        def __init__(self, *, tesseract_path, language):
+            created.append((tesseract_path, language))
+
+        def __call__(self, _image_path):
+            return [[([[0, 0], [1, 0], [1, 1], [0, 1]], "こんにちは", 0.99)]]
+
+    monkeypatch.setattr(subtitle_extraction, "TesseractOCR", FakeTesseract)
+    monkeypatch.setattr(
+        subtitle_extraction,
+        "_subtitle_packets",
+        lambda *_args, **_kwargs: [{"pts_time": "1.0", "duration_time": "1.0"}],
+    )
+
+    def fake_render(*args, **kwargs):
+        args[8].joinpath("frame_00001.png").write_bytes(b"png")
+
+    monkeypatch.setattr(subtitle_extraction, "_render_subtitle_frame_sequence", fake_render)
+
+    results = extract_subtitle_sidecars(
+        "ffmpeg",
+        "ffprobe",
+        source,
+        tmp_path,
+        "Anime.mkv",
+        ocr_backend="auto",
+        tesseract_path="/usr/bin/tesseract",
+    )
+
+    assert len(results) == 1
+    assert created == [("/usr/bin/tesseract", "jpn+eng")]
+    assert "こんにちは" in (tmp_path / results[0].output_name).read_text(encoding="utf-8")
+
+
+def test_tesseract_backend_returns_utf8_lines(tmp_path, monkeypatch):
+    calls: list[list[str]] = []
+
+    class Result:
+        stdout = "こんにちは\n世界。\n"
+        stderr = ""
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        assert kwargs["encoding"] == "utf-8"
+        return Result()
+
+    monkeypatch.setattr(subtitle_extraction.subprocess, "run", fake_run)
+    engine = subtitle_extraction.TesseractOCR(tesseract_path="tesseract", language="jpn+eng")
+
+    result = engine(tmp_path / "frame.png")
+
+    assert [entry[1] for entry in result[0]] == ["こんにちは", "世界。"]
+    assert calls[0][-2:] == ["-l", "jpn+eng"]
+
+
+def test_sidecar_validation_ignores_selected_source_stream(tmp_path):
+    source_streams = [
+        SubtitleStream(index=3, codec="subrip", language="eng"),
+        SubtitleStream(index=4, codec="dvd_subtitle", language="jpn"),
+    ]
+    sidecar = tmp_path / "Movie.sub01.eng.subrip.srt"
+    sidecar.write_text("1\n00:00:00,000 --> 00:00:01,000\nEnglish\n\n", encoding="utf-8")
+    item = OutputValidationItem(
+        source_file_id=1,
+        expected_output_name="Movie.mkv",
+        expected_final_path="/library/Movie.mkv",
+        profile="universal_h264_aac_srt",
+        subtitle_policy="prefer_srt_preserve_original",
+    )
+
+    _validate_subtitle_sidecars(
+        item,
+        tmp_path,
+        source_streams,
+        [{"source_stream_index": 3, "output_name": sidecar.name}],
+        ignored_source_stream_indexes={4},
+    )
+
+    assert item.errors == []

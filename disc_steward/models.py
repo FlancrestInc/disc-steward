@@ -219,6 +219,7 @@ class FileReviewDecision:
     sort_order: int | None = None
     encoding_profile: str = ""
     subtitle_policy: str = ""
+    ignored_subtitle_streams: list[int] = field(default_factory=list)
     generated_final_path: str | None = None
     notes: str | None = None
     warnings: list[str] = field(default_factory=list)

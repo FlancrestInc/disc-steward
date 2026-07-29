@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shlex
 import subprocess
 import tempfile
@@ -146,6 +147,8 @@ def _preview_runner(config: AppConfig):
                 "run",
                 "--rm",
                 "--init",
+                "--user",
+                f"{os.getuid()}:{os.getgid()}",
                 "--gpus",
                 "all",
                 "-e",

@@ -397,7 +397,7 @@ def test_build_ffmpeg_runner_wraps_remote_ssh_command(tmp_path, monkeypatch):
     config.path_mappings = AppConfig.path_mappings_for(barnabas=[(config.pipeline_root, remote_root)])
     captured: dict[str, list[str]] = {}
 
-    def fake_run(command, check=True):
+    def fake_run(command, check=True, **kwargs):
         captured["command"] = command
         return object()
 
@@ -408,9 +408,20 @@ def test_build_ffmpeg_runner_wraps_remote_ssh_command(tmp_path, monkeypatch):
 
     assert captured["command"][:4] == ["ssh", "-o", "BatchMode=yes", "flan@barnabas.lan"]
     remote_command = shlex.split(captured["command"][4])
-    assert remote_command[:8] == ["docker", "run", "--rm", "--init", "-v", f"{remote_root}:{remote_root}", "-v", "/mnt/data1/docker/disc-steward-ffmpeg:/mnt/data1/docker/disc-steward-ffmpeg"]
-    assert remote_command[8:11] == ["-w", str(remote_root), "disc-steward-ffmpeg:bookworm"]
-    assert remote_command[11:] == ["ffmpeg", "-hide_banner", "-i", f"{remote_root}/input file.mkv", f"{remote_root}/output file.mkv"]
+    assert remote_command[:10] == [
+        "docker",
+        "run",
+        "--rm",
+        "--init",
+        "--user",
+        "1000:1000",
+        "-v",
+        f"{remote_root}:{remote_root}",
+        "-v",
+        "/mnt/data1/docker/disc-steward-ffmpeg:/mnt/data1/docker/disc-steward-ffmpeg",
+    ]
+    assert remote_command[10:13] == ["-w", str(remote_root), "disc-steward-ffmpeg:bookworm"]
+    assert remote_command[13:] == ["ffmpeg", "-hide_banner", "-i", f"{remote_root}/input file.mkv", f"{remote_root}/output file.mkv"]
 
 
 def test_create_ffmpeg_processing_jobs_uses_remote_runner_when_configured(tmp_path, monkeypatch):
@@ -439,7 +450,7 @@ def test_create_ffmpeg_processing_jobs_uses_remote_runner_when_configured(tmp_pa
     remote_validation_root = config.to_barnabas_path(config.validation_needed_path)
     captured: list[list[str]] = []
 
-    def fake_run(command, check=True):
+    def fake_run(command, check=True, **kwargs):
         captured.append(command)
         if command[0] == "ssh":
             remote_command = shlex.split(command[-1])

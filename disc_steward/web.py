@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import fcntl
+import hashlib
 import mimetypes
+import os
 import shutil
 import subprocess
 import threading
@@ -755,6 +758,11 @@ def parse_review_form(
                 sort_order=integer(prefix + "sort_order"),
                 encoding_profile=text(prefix + "encoding_profile") or config.preferred_video_profile,
                 subtitle_policy=text(prefix + "subtitle_policy") or "manual_review",
+                ignored_subtitle_streams=[
+                    int(key.removeprefix(prefix + "ignore_subtitle_"))
+                    for key, value in form.items()
+                    if key.startswith(prefix + "ignore_subtitle_") and value == "on"
+                ],
                 notes=text(prefix + "notes"),
             )
         )
@@ -1371,7 +1379,12 @@ def render_file_card(config: AppConfig, job_id: int, row: dict, decision: FileRe
     audio = json.loads(row["audio_json"] or "[]")
     subtitles = json.loads(row["subtitle_json"] or "[]")
     source_for_plan = _source_for_plan(row, audio, subtitles)
-    subtitle_plan = generate_subtitle_plan(source_for_plan, decision.content_type, decision.subtitle_policy)
+    subtitle_plan = generate_subtitle_plan(
+        source_for_plan,
+        decision.content_type,
+        decision.subtitle_policy,
+        ignored_source_stream_indexes=set(decision.ignored_subtitle_streams),
+    )
     issues = _issues(classification)
     final_path = escape(str(generated.final_path)) if generated else ""
     controller_final_path = ""
@@ -1454,6 +1467,14 @@ def render_file_card(config: AppConfig, job_id: int, row: dict, decision: FileRe
           <p class="wide"><strong>Subtitle plan:</strong> {escape(', '.join(subtitle_plan.statuses))}</p>
           {"<p class='errors wide'>" + escape('; '.join(subtitle_plan.warnings)) + "</p>" if subtitle_plan.warnings else ""}
           <div class="file-fields wide file-fields-advanced">
+            <fieldset class="wide subtitle-stream-selection">
+              <legend>Subtitle streams</legend>
+              <p class="muted">Check a damaged or empty subtitle stream to skip OCR and continue processing. Stream numbers are the source file’s absolute FFmpeg indexes.</p>
+              {''.join(
+                  f'<label><input type="checkbox" name="{prefix}ignore_subtitle_{stream.get("index")}" {"checked" if int(stream.get("index")) in set(decision.ignored_subtitle_streams) else ""}> Ignore stream {stream.get("index")} · {escape(str(stream.get("language") or "und"))} · {escape(str(stream.get("codec") or "unknown"))}{" · " + escape(str(stream.get("title"))) if stream.get("title") else ""}</label>'
+                  for stream in subtitles
+              ) or '<p class="muted">No subtitle streams detected.</p>'}
+            </fieldset>
             <label class="ds-field">Original title <input class="ds-control" name="{prefix}original_title" value="{escape(decision.original_title or '')}"></label>
             <label class="ds-field">Translated title <input class="ds-control" name="{prefix}translated_title" value="{escape(decision.translated_title or '')}"></label>
             <label class="ds-field">Romanized title <input class="ds-control" name="{prefix}romanized_title" value="{escape(decision.romanized_title or '')}"></label>
@@ -1607,16 +1628,27 @@ def run_automation_worker(
     poll_interval: float = 1.0,
     stop_event: threading.Event | None = None,
 ) -> None:
-    db.reset_stuck_automation_jobs()
-    while True:
-        processed = _process_next_automation_job(db, config)
-        if stop_event is not None and stop_event.is_set():
+    runtime_dir = Path(f"/run/user/{os.getuid()}")
+    if not runtime_dir.is_dir():
+        runtime_dir = Path("/tmp")
+    lock_name = hashlib.sha256(str(db.path).encode("utf-8")).hexdigest()[:16]
+    lock_path = runtime_dir / f"disc-steward-automation-{lock_name}.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
             return
-        if processed:
-            continue
-        if stop_event is not None and stop_event.wait(timeout=poll_interval):
-            return
-        time.sleep(poll_interval)
+        db.reset_stuck_automation_jobs()
+        while True:
+            processed = _process_next_automation_job(db, config)
+            if stop_event is not None and stop_event.is_set():
+                return
+            if processed:
+                continue
+            if stop_event is not None and stop_event.wait(timeout=poll_interval):
+                return
+            time.sleep(poll_interval)
 
 
 def _process_next_automation_job(db: Database, config: AppConfig) -> bool:

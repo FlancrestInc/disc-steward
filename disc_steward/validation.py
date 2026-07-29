@@ -93,7 +93,15 @@ def validate_job_outputs(
         if str(output_path) in matched_paths:
             item.errors.append("output conflicts with another item in this job")
         matched_paths.add(str(output_path))
-        _validate_matched_output(config, item, source, output_path, runner, payload.get("subtitle_outputs") or [])
+        _validate_matched_output(
+            config,
+            item,
+            source,
+            output_path,
+            runner,
+            payload.get("subtitle_outputs") or [],
+            ignored_source_stream_indexes=set(payload.get("ignored_subtitle_streams") or []),
+        )
         item.status = "passed" if not item.errors else "failed"
         items.append(item)
 
@@ -171,7 +179,10 @@ def _validate_subtitle_sidecars(
     output_dir: Path,
     source_streams: list[SubtitleStream],
     subtitle_outputs: list[dict],
+    ignored_source_stream_indexes: set[int] | None = None,
 ) -> None:
+    ignored = ignored_source_stream_indexes or set()
+    source_streams = [stream for stream in source_streams if stream.index not in ignored]
     result_indexes = [subtitle.get("source_stream_index") for subtitle in subtitle_outputs]
     for stream in source_streams:
         matches = result_indexes.count(stream.index)
@@ -216,6 +227,7 @@ def _validate_matched_output(
     output_path: Path,
     ffprobe_runner: Callable[[Path], str],
     subtitle_outputs: list[dict] | None = None,
+    ignored_source_stream_indexes: set[int] | None = None,
 ) -> None:
     if not output_path.is_file():
         item.errors.append(f"output path is not a file: {output_path}")
@@ -241,7 +253,13 @@ def _validate_matched_output(
         "subtitles": [stream.__dict__ for stream in parsed.subtitle_streams],
     }
     _validate_duration(config, source, parsed, item)
-    _validate_subtitle_sidecars(item, output_path.parent, source.subtitle_streams, subtitle_outputs or [])
+    _validate_subtitle_sidecars(
+        item,
+        output_path.parent,
+        source.subtitle_streams,
+        subtitle_outputs or [],
+        ignored_source_stream_indexes=ignored_source_stream_indexes,
+    )
     if not item.expected_final_path:
         item.errors.append("generated final library path is missing")
     role_allows_no_video = item.profile in VIDEO_OPTIONAL_ROLES

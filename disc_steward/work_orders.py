@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -212,9 +213,11 @@ def _subtitle_warning_messages(source: ScannedFile, *, convert_image_subtitles_t
     return warnings
 
 
-def _subtitle_outputs_for_source(source: ScannedFile, video_name: str, *, convert_image_subtitles_to_srt: bool) -> list[dict]:
+def _subtitle_outputs_for_source(source: ScannedFile, video_name: str, *, convert_image_subtitles_to_srt: bool, ignored_source_stream_indexes: set[int] | None = None) -> list[dict]:
     outputs: list[dict] = []
     for ordinal, stream in enumerate(source.subtitle_streams):
+        if stream.index in (ignored_source_stream_indexes or set()):
+            continue
         codec = (stream.codec or "").lower()
         outputs.append(
             {
@@ -230,8 +233,8 @@ def _subtitle_outputs_for_source(source: ScannedFile, video_name: str, *, conver
     return outputs
 
 
-def _require_subtitle_sidecar_coverage(source: ScannedFile, subtitle_outputs: list[dict]) -> None:
-    source_indexes = [stream.index for stream in source.subtitle_streams]
+def _require_subtitle_sidecar_coverage(source: ScannedFile, subtitle_outputs: list[dict], ignored_source_stream_indexes: set[int] | None = None) -> None:
+    source_indexes = [stream.index for stream in source.subtitle_streams if stream.index not in (ignored_source_stream_indexes or set())]
     result_indexes = [result.get("source_stream_index") for result in subtitle_outputs]
     for source_index in source_indexes:
         matches = result_indexes.count(source_index)
@@ -283,6 +286,7 @@ def build_ffmpeg_item_payload(
                 subtitle_policy=decision.subtitle_policy,
                 preferred_format=config.subtitle_planning.preferred_format,
                 preserve_original_subtitles=config.subtitle_planning.preserve_original_subtitles,
+                ignored_source_stream_indexes=set(decision.ignored_subtitle_streams),
             )
         )
         if source is not None
@@ -307,6 +311,7 @@ def build_ffmpeg_item_payload(
         source,
         final_path.name,
         convert_image_subtitles_to_srt=config.subtitle_planning.convert_image_subtitles_to_srt,
+        ignored_source_stream_indexes=set(decision.ignored_subtitle_streams),
     ) if source is not None else []
     payload = {
         "job_id": job_id,
@@ -324,6 +329,7 @@ def build_ffmpeg_item_payload(
         "subtitle_policy": decision.subtitle_policy,
         "subtitle_plan": subtitle_plan,
         "subtitle_outputs": subtitle_outputs,
+        "ignored_subtitle_streams": sorted(set(decision.ignored_subtitle_streams)),
         "output_name": final_path.name,
         "barnabas_validation_output_dir": str(config.to_barnabas_path(config.validation_needed_path / f"job_{job_id}")),
         "final_library_path": str(final_path),
@@ -392,6 +398,8 @@ def build_ffmpeg_runner(config: AppConfig) -> Callable[[list[str]], object]:
                 "run",
                 "--rm",
                 "--init",
+                "--user",
+                f"{os.getuid()}:{os.getgid()}",
                 "-v",
                 f"{host_pipeline_root}:{host_pipeline_root}",
                 "-v",
@@ -401,7 +409,7 @@ def build_ffmpeg_runner(config: AppConfig) -> Callable[[list[str]], object]:
                 docker_image,
                 *translated,
             ]
-            return subprocess.run([*ssh_command, shlex.join(docker_command)], check=True)
+            return _run_checked_command([*ssh_command, shlex.join(docker_command)])
 
         return run_remote
     raise ValueError(f"Unknown processing.method: {config.processing.method}")
@@ -433,6 +441,8 @@ def build_ffprobe_runner(config: AppConfig) -> Callable[[list[str]], str]:
                 "run",
                 "--rm",
                 "--init",
+                "--user",
+                f"{os.getuid()}:{os.getgid()}",
                 "-v",
                 f"{host_pipeline_root}:{host_pipeline_root}",
                 "-v",
@@ -453,6 +463,20 @@ def _run_ffmpeg(command: list[str], runner: Callable[[list[str]], object] | None
         subprocess.run(command, check=True)
         return
     runner(command)
+
+
+def _run_checked_command(command: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run a command while retaining useful stderr for background-job failures."""
+    try:
+        return subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as error:
+        details = (error.stderr or error.stdout or "").strip()
+        if len(details) > 4000:
+            details = details[-4000:]
+        suffix = f"\n{details}" if details else ""
+        raise RuntimeError(
+            f"Command failed with exit status {error.returncode}: {shlex.join(command)}{suffix}"
+        ) from error
 
 
 def create_ffmpeg_processing_jobs(
@@ -536,6 +560,9 @@ def create_ffmpeg_processing_jobs(
                 ffmpeg_runner=run_ffmpeg,
                 convert_image_subtitles_to_srt=config.subtitle_planning.convert_image_subtitles_to_srt,
                 ffprobe_runner=run_ffprobe,
+                ignored_source_stream_indexes=set(decision.ignored_subtitle_streams),
+                ocr_backend=config.subtitle_planning.image_subtitle_ocr_backend,
+                tesseract_path=config.subtitle_planning.tesseract_path,
             )
             payload["subtitle_outputs"] = [
                 {
@@ -550,7 +577,7 @@ def create_ffmpeg_processing_jobs(
                 }
                 for result in subtitle_results
             ]
-            _require_subtitle_sidecar_coverage(source, payload["subtitle_outputs"])
+            _require_subtitle_sidecar_coverage(source, payload["subtitle_outputs"], set(decision.ignored_subtitle_streams))
             item_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
             db.save_work_order_record(job_id, decision.source_file_id, str(item_path), payload, status="processed")
 

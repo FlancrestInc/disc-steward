@@ -10,7 +10,6 @@ def build_status_summary(db, config: AppConfig) -> dict:
     counts = Counter(job.status for job in jobs)
     validation_failures = 0
     transfer_conflicts = 0
-    recent_errors: list[dict] = []
     for job in jobs:
         validation = db.latest_validation_summary(job.id)
         if job.status == "validation_failed" or (validation and not validation.get("passed")):
@@ -20,6 +19,7 @@ def build_status_summary(db, config: AppConfig) -> dict:
             transfer_conflicts += 1
     subtitle_issues = _count_subtitle_issues(db)
     cleanup_items = db.list_cleanup_eligibility()
+    recent_errors: list[dict] = []
     for job in jobs:
         for event in db.list_audit_events(job.id)[-5:]:
             if ("error" in event["event_type"] or "failed" in event["event_type"]) and not event.get("dismissed", False):
