@@ -22,10 +22,12 @@ from disc_steward.review import (
     validate_review_ready,
 )
 from disc_steward.web import handle_job_action, render_job_review
+import disc_steward.work_orders as work_orders
 from disc_steward.work_orders import (
     build_ffmpeg_runner,
     build_fileflows_item_payload,
     build_tesseract_runner,
+    build_rapidocr_runner,
     create_ffmpeg_processing_jobs,
     generate_final_paths,
     sanitize_filename_component,
@@ -460,6 +462,32 @@ def test_build_tesseract_runner_batches_frames_in_remote_worker(tmp_path, monkey
     assert "tesseract" in remote_command[15]
     assert "jpn+eng" in remote_command[15]
     assert remote_command[-2:] == [str(tmp_path / "frame 1.png"), str(tmp_path / "frame 2.png")]
+
+
+def test_build_rapidocr_runner_batches_frames_in_remote_worker(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    config.processing.method = "ssh"
+    config.processing.ssh_target = "barnabas.lan"
+    config.processing.ssh_user = "flan"
+    config.processing.docker_image = "disc-steward-ffmpeg:bookworm"
+    config.processing.docker_state_root = "/mnt/data1/docker/disc-steward-ffmpeg"
+    remote_root = tmp_path / "barnabas-media-pipeline"
+    config.path_mappings = AppConfig.path_mappings_for(barnabas=[(config.pipeline_root, remote_root)])
+    captured: list[list[str]] = []
+
+    class Result:
+        stdout = '["English", "Subtitle"]'
+        stderr = ""
+
+    def fake_checked(command):
+        captured.append(command)
+        return Result()
+
+    monkeypatch.setattr(work_orders, "_run_checked_command", fake_checked)
+    runner = build_rapidocr_runner(config)
+
+    assert runner is not None
+    assert runner([tmp_path / "frame 1.png", tmp_path / "frame 2.png"]) == ["English", "Subtitle"]
 
 
 def test_create_ffmpeg_processing_jobs_uses_remote_runner_when_configured(tmp_path, monkeypatch):

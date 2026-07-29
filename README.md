@@ -64,20 +64,20 @@ cp config.example.yaml config.yaml
 
 Install `ffprobe` from FFmpeg and make sure it is on `PATH`, or set `ffprobe_path` in `config.yaml`.
 
-For image-based Japanese subtitles (PGS/VobSub), the Barnabas `disc-steward-ffmpeg` worker image
-includes Tesseract and its Japanese and English language data. Rebuild that image from
-`deploy/docker/disc-steward-ffmpeg/Dockerfile` when updating the worker:
+For image-based subtitles (PGS/VobSub), the Barnabas `disc-steward-ffmpeg` worker image
+includes Tesseract, RapidOCR, and the Japanese/English language data. Rebuild that image from
+`deploy/docker/disc-steward-ffmpeg/` when updating the worker:
 
 ```bash
 # Run from the Disc Steward repository root:
-ssh flan@barnabas.lan 'docker build -t disc-steward-ffmpeg:bookworm -' \\
-  < deploy/docker/disc-steward-ffmpeg/Dockerfile
+tar -C deploy/docker/disc-steward-ffmpeg -cf - Dockerfile ocr_worker.py \\
+  | ssh flan@barnabas.lan 'docker build -t disc-steward-ffmpeg:bookworm -'
 ```
 
 With `subtitle_planning.image_subtitle_ocr_backend: auto`, Japanese-tagged image subtitle
-streams use the Barnabas worker's Tesseract with `jpn+eng`; other image streams continue to use
-RapidOCR. Set the backend to `tesseract` to force it for every image subtitle stream, or `rapidocr`
-to retain the previous behavior.
+streams use the Barnabas worker's Tesseract with `jpn+eng`; other image streams use the
+Barnabas worker's RapidOCR. Set the backend to `tesseract` to force it for every image subtitle
+stream, or `rapidocr` to retain the RapidOCR behavior.
 
 ## Commands
 

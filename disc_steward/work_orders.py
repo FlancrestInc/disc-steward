@@ -517,6 +517,42 @@ def build_tesseract_runner(config: AppConfig) -> Callable[[list[Path]], list[str
     raise ValueError(f"Unknown processing.method: {config.processing.method}")
 
 
+def build_rapidocr_runner(config: AppConfig) -> Callable[[list[Path]], list[str]] | None:
+    method = (config.processing.method or "local").strip().lower()
+    if method in {"", "local"}:
+        return None
+    if method != "ssh":
+        raise ValueError(f"Unknown processing.method: {config.processing.method}")
+    target = config.processing.ssh_target.strip()
+    if not target:
+        raise ValueError("processing.ssh_target is required when processing.method is ssh")
+    user = config.processing.ssh_user.strip()
+    ssh_destination = f"{user}@{target}" if user else target
+    ssh_command = ["ssh", *config.processing.ssh_options, ssh_destination]
+    host_pipeline_root = config.to_barnabas_path(config.pipeline_root)
+    docker_image = config.processing.docker_image.strip()
+    docker_state_root = config.processing.docker_state_root.strip()
+    if not docker_image or not docker_state_root:
+        raise ValueError("processing.docker_image and processing.docker_state_root are required for SSH OCR")
+
+    def run_remote(image_paths: list[Path]) -> list[str]:
+        translated = [str(config.to_barnabas_path(path)) for path in image_paths]
+        docker_command = [
+            "docker", "run", "--rm", "--init", "--user", f"{os.getuid()}:{os.getgid()}",
+            "-v", f"{host_pipeline_root}:{host_pipeline_root}",
+            "-v", f"{docker_state_root}:{docker_state_root}",
+            "-w", str(host_pipeline_root), docker_image,
+            "/opt/disc-steward-ocr-venv/bin/python", "/opt/disc-steward-ocr-worker.py", *translated,
+        ]
+        result = _run_checked_command([*ssh_command, shlex.join(docker_command)])
+        texts = json.loads(result.stdout)
+        if not isinstance(texts, list) or len(texts) != len(image_paths) or not all(isinstance(text, str) for text in texts):
+            raise RuntimeError("Barnabas RapidOCR returned an invalid batch response")
+        return texts
+
+    return run_remote
+
+
 def _run_ffmpeg(command: list[str], runner: Callable[[list[str]], object] | None = None) -> None:
     if runner is None:
         subprocess.run(command, check=True)
@@ -571,6 +607,7 @@ def create_ffmpeg_processing_jobs(
     run_ffmpeg = ffmpeg_runner or build_ffmpeg_runner(config)
     run_ffprobe = build_ffprobe_runner(config)
     run_tesseract = build_tesseract_runner(config)
+    run_rapidocr = build_rapidocr_runner(config)
     remote_processing = (config.processing.method or "local").strip().lower() == "ssh"
     processing_status = "validation_needed"
     if not config.dry_run and included:
@@ -624,6 +661,7 @@ def create_ffmpeg_processing_jobs(
                 ocr_backend=config.subtitle_planning.image_subtitle_ocr_backend,
                 tesseract_path=config.subtitle_planning.tesseract_path,
                 tesseract_batch_runner=run_tesseract,
+                rapidocr_batch_runner=run_rapidocr,
             )
             payload["subtitle_outputs"] = [
                 {

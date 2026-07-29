@@ -56,6 +56,7 @@ def extract_subtitle_sidecars(
     ocr_backend: str = "auto",
     tesseract_path: str = "tesseract",
     tesseract_batch_runner: Callable[[list[Path]], list[str]] | None = None,
+    rapidocr_batch_runner: Callable[[list[Path]], list[str]] | None = None,
 ) -> list[SubtitleSidecar]:
     output_dir.mkdir(parents=True, exist_ok=True)
     streams = list(source.subtitle_streams)
@@ -95,6 +96,7 @@ def extract_subtitle_sidecars(
                 backend=ocr_backend,
                 tesseract_path=tesseract_path,
                 tesseract_batch_runner=tesseract_batch_runner,
+                rapidocr_batch_runner=rapidocr_batch_runner,
             )
             if _extract_image_subtitle(
                 ffmpeg_path,
@@ -131,6 +133,7 @@ def _create_ocr_engine(
     backend: str,
     tesseract_path: str,
     tesseract_batch_runner: Callable[[list[Path]], list[str]] | None,
+    rapidocr_batch_runner: Callable[[list[Path]], list[str]] | None,
 ) -> Any:
     normalized_backend = (backend or "auto").strip().lower()
     if normalized_backend not in {"auto", "rapidocr", "tesseract"}:
@@ -144,8 +147,24 @@ def _create_ocr_engine(
             batch_runner=tesseract_batch_runner,
         )
     if RapidOCR is None:
+        if rapidocr_batch_runner is not None:
+            return BatchTextOCR(rapidocr_batch_runner)
         raise RuntimeError("rapidocr-onnxruntime is required to OCR image subtitle streams")
+    if rapidocr_batch_runner is not None:
+        return BatchTextOCR(rapidocr_batch_runner)
     return RapidOCR()
+
+
+class BatchTextOCR:
+    def __init__(self, runner: Callable[[list[Path]], list[str]]) -> None:
+        self.runner = runner
+
+    def recognize_many(self, image_paths: list[Path]) -> list[str]:
+        return self.runner(image_paths)
+
+    def __call__(self, image_path: Path) -> list[list[tuple[list[list[int]], str, float]]]:
+        text = self.runner([image_path])[0]
+        return [[([[0, 0], [1, 0], [1, 1], [0, 1]], line, 1.0) for line in text.splitlines() if line.strip()]]
 
 
 class TesseractOCR:
