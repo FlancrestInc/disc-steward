@@ -6,6 +6,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         ffmpeg \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        tesseract-ocr-jpn \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /mnt/data2/media-pipeline

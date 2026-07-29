@@ -551,7 +551,7 @@ def test_auto_backend_uses_tesseract_for_japanese_image_subtitles(tmp_path, monk
     created: list[tuple[str, str]] = []
 
     class FakeTesseract:
-        def __init__(self, *, tesseract_path, language):
+        def __init__(self, *, tesseract_path, language, batch_runner=None):
             created.append((tesseract_path, language))
 
         def __call__(self, _image_path):

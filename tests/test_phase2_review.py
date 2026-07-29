@@ -25,6 +25,7 @@ from disc_steward.web import handle_job_action, render_job_review
 from disc_steward.work_orders import (
     build_ffmpeg_runner,
     build_fileflows_item_payload,
+    build_tesseract_runner,
     create_ffmpeg_processing_jobs,
     generate_final_paths,
     sanitize_filename_component,
@@ -422,6 +423,43 @@ def test_build_ffmpeg_runner_wraps_remote_ssh_command(tmp_path, monkeypatch):
     ]
     assert remote_command[10:13] == ["-w", str(remote_root), "disc-steward-ffmpeg:bookworm"]
     assert remote_command[13:] == ["ffmpeg", "-hide_banner", "-i", f"{remote_root}/input file.mkv", f"{remote_root}/output file.mkv"]
+
+
+def test_build_tesseract_runner_batches_frames_in_remote_worker(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    config.processing.method = "ssh"
+    config.processing.ssh_target = "barnabas.lan"
+    config.processing.ssh_user = "flan"
+    config.processing.ssh_options = ["-o", "BatchMode=yes"]
+    config.processing.docker_image = "disc-steward-ffmpeg:bookworm"
+    config.processing.docker_state_root = "/mnt/data1/docker/disc-steward-ffmpeg"
+    remote_root = tmp_path / "barnabas-media-pipeline"
+    config.path_mappings = AppConfig.path_mappings_for(barnabas=[(config.pipeline_root, remote_root)])
+    captured: list[list[str]] = []
+
+    class Result:
+        stdout = "こんにちは\x1f世界。\x1f"
+        stderr = ""
+
+    def fake_run(command, **kwargs):
+        captured.append(command)
+        return Result()
+
+    monkeypatch.setattr("disc_steward.work_orders.subprocess.run", fake_run)
+    runner = build_tesseract_runner(config)
+
+    assert runner([tmp_path / "frame 1.png", tmp_path / "frame 2.png"]) == ["こんにちは", "世界。"]
+    remote_command = shlex.split(captured[0][4])
+    assert remote_command[:10] == [
+        "docker", "run", "--rm", "--init", "--user", "1000:1000",
+        "-v", f"{remote_root}:{remote_root}",
+        "-v", "/mnt/data1/docker/disc-steward-ffmpeg:/mnt/data1/docker/disc-steward-ffmpeg",
+    ]
+    assert remote_command[10:13] == ["-w", str(remote_root), "disc-steward-ffmpeg:bookworm"]
+    assert remote_command[13:17] == ["sh", "-c", remote_command[15], "disc-steward-ocr"]
+    assert "tesseract" in remote_command[15]
+    assert "jpn+eng" in remote_command[15]
+    assert remote_command[-2:] == [str(tmp_path / "frame 1.png"), str(tmp_path / "frame 2.png")]
 
 
 def test_create_ffmpeg_processing_jobs_uses_remote_runner_when_configured(tmp_path, monkeypatch):

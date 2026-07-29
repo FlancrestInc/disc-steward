@@ -458,6 +458,65 @@ def build_ffprobe_runner(config: AppConfig) -> Callable[[list[str]], str]:
     raise ValueError(f"Unknown processing.method: {config.processing.method}")
 
 
+def build_tesseract_runner(config: AppConfig) -> Callable[[list[Path]], list[str]]:
+    method = (config.processing.method or "local").strip().lower()
+    tesseract_path = config.subtitle_planning.tesseract_path.strip() or "tesseract"
+    language = "jpn+eng"
+    if method in {"", "local"}:
+        def run_local(image_paths: list[Path]) -> list[str]:
+            results: list[str] = []
+            for image_path in image_paths:
+                result = subprocess.run(
+                    [tesseract_path, str(image_path), "stdout", "--oem", "1", "--psm", "6", "-l", language],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+                results.append(result.stdout)
+            return results
+
+        return run_local
+    if method == "ssh":
+        target = config.processing.ssh_target.strip()
+        if not target:
+            raise ValueError("processing.ssh_target is required when processing.method is ssh")
+        user = config.processing.ssh_user.strip()
+        ssh_destination = f"{user}@{target}" if user else target
+        ssh_command = ["ssh", *config.processing.ssh_options, ssh_destination]
+        host_pipeline_root = config.to_barnabas_path(config.pipeline_root)
+        docker_image = config.processing.docker_image.strip()
+        docker_state_root = config.processing.docker_state_root.strip()
+        if not docker_image or not docker_state_root:
+            raise ValueError("processing.docker_image and processing.docker_state_root are required for SSH OCR")
+
+        def run_remote(image_paths: list[Path]) -> list[str]:
+            translated = [str(config.to_barnabas_path(path)) for path in image_paths]
+            script = (
+                "for image do "
+                f"{shlex.quote(tesseract_path)} \"$image\" stdout --oem 1 --psm 6 -l {shlex.quote(language)}; "
+                "printf '\\037'; "
+                "done"
+            )
+            docker_command = [
+                "docker", "run", "--rm", "--init", "--user", f"{os.getuid()}:{os.getgid()}",
+                "-v", f"{host_pipeline_root}:{host_pipeline_root}",
+                "-v", f"{docker_state_root}:{docker_state_root}",
+                "-w", str(host_pipeline_root), docker_image,
+                "sh", "-c", script, "disc-steward-ocr", *translated,
+            ]
+            result = _run_checked_command([*ssh_command, shlex.join(docker_command)])
+            texts = result.stdout.split("\x1f")
+            if texts and texts[-1] == "":
+                texts.pop()
+            if len(texts) != len(image_paths):
+                raise RuntimeError(f"Barnabas OCR returned {len(texts)} results for {len(image_paths)} frames")
+            return texts
+
+        return run_remote
+    raise ValueError(f"Unknown processing.method: {config.processing.method}")
+
+
 def _run_ffmpeg(command: list[str], runner: Callable[[list[str]], object] | None = None) -> None:
     if runner is None:
         subprocess.run(command, check=True)
@@ -511,6 +570,7 @@ def create_ffmpeg_processing_jobs(
     warnings: list[str] = []
     run_ffmpeg = ffmpeg_runner or build_ffmpeg_runner(config)
     run_ffprobe = build_ffprobe_runner(config)
+    run_tesseract = build_tesseract_runner(config)
     remote_processing = (config.processing.method or "local").strip().lower() == "ssh"
     processing_status = "validation_needed"
     if not config.dry_run and included:
@@ -563,6 +623,7 @@ def create_ffmpeg_processing_jobs(
                 ignored_source_stream_indexes=set(decision.ignored_subtitle_streams),
                 ocr_backend=config.subtitle_planning.image_subtitle_ocr_backend,
                 tesseract_path=config.subtitle_planning.tesseract_path,
+                tesseract_batch_runner=run_tesseract,
             )
             payload["subtitle_outputs"] = [
                 {

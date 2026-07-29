@@ -55,6 +55,7 @@ def extract_subtitle_sidecars(
     ignored_source_stream_indexes: set[int] | None = None,
     ocr_backend: str = "auto",
     tesseract_path: str = "tesseract",
+    tesseract_batch_runner: Callable[[list[Path]], list[str]] | None = None,
 ) -> list[SubtitleSidecar]:
     output_dir.mkdir(parents=True, exist_ok=True)
     streams = list(source.subtitle_streams)
@@ -93,6 +94,7 @@ def extract_subtitle_sidecars(
                 stream.language,
                 backend=ocr_backend,
                 tesseract_path=tesseract_path,
+                tesseract_batch_runner=tesseract_batch_runner,
             )
             if _extract_image_subtitle(
                 ffmpeg_path,
@@ -123,14 +125,24 @@ def extract_subtitle_sidecars(
     return results
 
 
-def _create_ocr_engine(language: str | None, *, backend: str, tesseract_path: str) -> Any:
+def _create_ocr_engine(
+    language: str | None,
+    *,
+    backend: str,
+    tesseract_path: str,
+    tesseract_batch_runner: Callable[[list[Path]], list[str]] | None,
+) -> Any:
     normalized_backend = (backend or "auto").strip().lower()
     if normalized_backend not in {"auto", "rapidocr", "tesseract"}:
         raise ValueError(f"unsupported subtitle OCR backend: {backend}")
     if normalized_backend == "tesseract" or (
         normalized_backend == "auto" and (language or "").strip().lower() in JAPANESE_LANGUAGE_CODES
     ):
-        return TesseractOCR(tesseract_path=tesseract_path, language="jpn+eng")
+        return TesseractOCR(
+            tesseract_path=tesseract_path,
+            language="jpn+eng",
+            batch_runner=tesseract_batch_runner,
+        )
     if RapidOCR is None:
         raise RuntimeError("rapidocr-onnxruntime is required to OCR image subtitle streams")
     return RapidOCR()
@@ -139,12 +151,29 @@ def _create_ocr_engine(language: str | None, *, backend: str, tesseract_path: st
 class TesseractOCR:
     """Small callable adapter for Tesseract's UTF-8 text output."""
 
-    def __init__(self, *, tesseract_path: str, language: str) -> None:
+    def __init__(
+        self,
+        *,
+        tesseract_path: str,
+        language: str,
+        batch_runner: Callable[[list[Path]], list[str]] | None = None,
+    ) -> None:
         self.tesseract_path = tesseract_path
         self.language = language
+        self.batch_runner = batch_runner
 
     def __call__(self, image_path: Path) -> list[list[tuple[list[list[int]], str, float]]]:
-        # Keep the arguments explicit: Tesseract emits UTF-8 text on stdout.
+        text = self.batch_runner([image_path])[0] if self.batch_runner is not None else self._run_local(image_path)
+        if not text.strip():
+            return [None]  # type: ignore[list-item]
+        return [[([[0, 0], [1, 0], [1, 1], [0, 1]], line, 1.0) for line in text.splitlines() if line.strip()]]
+
+    def recognize_many(self, image_paths: list[Path]) -> list[str]:
+        if self.batch_runner is not None:
+            return self.batch_runner(image_paths)
+        return [self._run_local(image_path) for image_path in image_paths]
+
+    def _run_local(self, image_path: Path) -> str:
         command = [
             self.tesseract_path,
             str(image_path),
@@ -165,10 +194,7 @@ class TesseractOCR:
         except subprocess.CalledProcessError as exc:
             detail = (exc.stderr or "").strip()
             raise RuntimeError(f"Tesseract subtitle OCR failed{': ' + detail if detail else ''}") from exc
-        text = result.stdout.strip()
-        if not text:
-            return [None]  # type: ignore[list-item]
-        return [[([[0, 0], [1, 0], [1, 1], [0, 1]], line, 1.0) for line in text.splitlines() if line.strip()]]
+        return result.stdout
 
 
 def _extract_text_subtitle(
@@ -249,9 +275,10 @@ def _extract_image_subtitle(
                 source_offset=chunk_origin,
             )
             frame_paths = sorted(image_dir.glob("*.png"))
-            chunk_texts: list[str] = []
-            for frame_path in frame_paths:
-                chunk_texts.append(_ocr_frame(frame_path, ocr_engine))
+            if hasattr(ocr_engine, "recognize_many"):
+                chunk_texts = ocr_engine.recognize_many(frame_paths)
+            else:
+                chunk_texts = [_ocr_frame(frame_path, ocr_engine) for frame_path in frame_paths]
             for (start, end), text in zip(chunk_spans, chunk_texts, strict=False):
                 if text:
                     cues.append((start, end, text))
