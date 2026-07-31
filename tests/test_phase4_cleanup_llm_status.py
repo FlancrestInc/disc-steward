@@ -4,9 +4,10 @@ from pathlib import Path
 import sqlite3
 import os
 import time
+import threading
 from dataclasses import asdict
 
-from disc_steward.cleanup import cleanup_previews, execute_cleanup, plan_cleanup
+from disc_steward.cleanup import cleanup_previews, execute_cleanup, plan_cleanup, run_cleanup_worker
 from disc_steward.config import AppConfig, CleanupConfig, LLMConfig, MetadataConfig, config_from_dict
 from disc_steward.db import Database
 from disc_steward.llm import build_disc_job_packet, request_suggestions
@@ -325,6 +326,25 @@ def test_cleanup_plan_eligibility_after_successful_import(tmp_path):
     assert str(raw) in paths
     assert str(working) in paths
     assert db.list_cleanup_eligibility(job_id)
+
+
+def test_cleanup_worker_retries_completed_job_cleanup(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    stop_event = threading.Event()
+    calls = []
+
+    def fake_execute(_db, _config):
+        calls.append(True)
+        stop_event.set()
+        return type("Summary", (), {"deleted": ["artifact"], "errors": []})()
+
+    monkeypatch.setattr("disc_steward.cleanup.execute_cleanup", fake_execute)
+    db = Database(tmp_path / "disc_steward.sqlite3")
+    db.initialize()
+
+    run_cleanup_worker(db, config, poll_interval=60, stop_event=stop_event)
+
+    assert calls == [True]
 
 
 def test_live_legacy_raw_file_cleanup_deletes_eligible_raw_file(tmp_path):

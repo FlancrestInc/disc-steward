@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .config import load_config
-from .cleanup import cleanup_previews, execute_cleanup, plan_cleanup
+from .cleanup import cleanup_previews, execute_cleanup, plan_cleanup, run_cleanup_worker
 from .db import Database
 from .reports import generate_reports
 from .scanner import scan_completed_rips, watch_completed_rips
@@ -46,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", parents=[shared], help="Show pipeline status summary")
     automation = sub.add_parser("automation-worker", parents=[shared], help="Run the durable automation queue worker")
     automation.add_argument("--poll-interval", type=float, default=1.0, help="Seconds to sleep when the queue is empty")
+    cleanup_worker = sub.add_parser("cleanup-worker", parents=[shared], help="Retry cleanup for completed jobs")
+    cleanup_worker.add_argument("--poll-interval", type=float, default=60.0, help="Seconds between cleanup passes")
     preview = sub.add_parser("preview-worker", parents=[shared], help="Generate browser-native video previews on Barnabas")
     preview.add_argument("--poll-interval", type=float, default=1.0, help="Seconds to sleep when the queue is empty")
     watch = sub.add_parser("watch", parents=[shared], help="Continuously scan for new completed rips")
@@ -152,6 +154,13 @@ def main(argv: list[str] | None = None) -> int:
             run_automation_worker(db, config, poll_interval=args.poll_interval)
         except KeyboardInterrupt:
             print("automation worker stopped by user")
+            return 130
+        return 0
+    if args.command == "cleanup-worker":
+        try:
+            run_cleanup_worker(db, config, poll_interval=args.poll_interval)
+        except KeyboardInterrupt:
+            print("cleanup worker stopped by user")
             return 130
         return 0
     if args.command == "preview-worker":

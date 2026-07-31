@@ -4,14 +4,52 @@ import shutil
 import shlex
 import subprocess
 import time
+import fcntl
+import hashlib
+import logging
+import os
+import threading
 from dataclasses import asdict
 from pathlib import Path
 
 from .config import AppConfig
 from .models import CleanupEligibilityItem, CleanupPlanSummary
 
+LOG = logging.getLogger(__name__)
+
 
 FINAL_SUCCESS_STATUSES = {"imported_to_jellyfin"}
+
+
+def run_cleanup_worker(
+    db,
+    config: AppConfig,
+    *,
+    poll_interval: float = 60.0,
+    stop_event: threading.Event | None = None,
+) -> None:
+    """Retry cleanup for completed jobs, including jobs transferred before cleanup ran."""
+    runtime_dir = Path(f"/run/user/{os.getuid()}")
+    if not runtime_dir.is_dir():
+        runtime_dir = Path("/tmp")
+    lock_name = hashlib.sha256(str(db.path).encode("utf-8")).hexdigest()[:16]
+    lock_path = runtime_dir / f"disc-steward-cleanup-{lock_name}.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        while True:
+            try:
+                summary = execute_cleanup(db, config)
+                if summary.deleted or summary.errors:
+                    LOG.info("cleanup retry: deleted=%s errors=%s", len(summary.deleted), len(summary.errors))
+            except Exception:
+                LOG.exception("cleanup worker iteration failed")
+            if stop_event is not None and stop_event.wait(timeout=poll_interval):
+                return
+            time.sleep(poll_interval)
 
 
 def plan_cleanup(db, config: AppConfig, job_id: int | None = None) -> CleanupPlanSummary:

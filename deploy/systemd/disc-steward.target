@@ -1,6 +1,6 @@
 [Unit]
 Description=Disc Steward bundle target
-Wants=disc-steward-watch.service disc-steward-review.service disc-steward-automation.service disc-steward-preview.service
+Wants=disc-steward-watch.service disc-steward-review.service disc-steward-automation.service disc-steward-preview.service disc-steward-cleanup.service
 After=network-online.target
 
 [Install]
