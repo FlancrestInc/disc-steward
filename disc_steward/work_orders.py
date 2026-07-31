@@ -588,7 +588,7 @@ def create_ffmpeg_processing_jobs(
         raise ValueError("job must be reviewed before processing outputs can be created")
     decisions = db.list_file_reviews(job_id)
     paths = generate_final_paths(config, job_review, decisions)
-    validate_review_ready(job_review, decisions, paths)
+    validate_review_ready(job_review, decisions, paths, job_kind=job.job_kind)
     for decision in decisions:
         generated = paths.get(decision.source_file_id)
         if generated:

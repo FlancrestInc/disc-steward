@@ -59,10 +59,27 @@ def suggest_subtitle_policy(
     return SubtitlePolicySuggestion("preserve_existing", warnings, ["no subtitle conversion risk detected"])
 
 
+BONUS_DISC_ROLES = {
+    "extra",
+    "trailer",
+    "featurette",
+    "deleted_scene",
+    "interview",
+    "music_video",
+    "short_film",
+    "promo",
+    "alternate_cut",
+    "commentary_variant",
+    "menu_or_bumper",
+}
+
+
 def validate_review_ready(
     job_review: JobReviewMetadata,
     decisions: list[FileReviewDecision],
     generated_paths: dict[int, GeneratedPath],
+    *,
+    job_kind: str = "standard",
 ) -> None:
     if job_review.review_status == "manual_review":
         return
@@ -76,8 +93,10 @@ def validate_review_ready(
             messages.append("title is required for movie/show jobs")
         if job_review.year is None:
             messages.append("year is required for movie/show jobs")
-    if content_type == "movie" and not any(decision.role == "main_feature" for decision in included):
+    if content_type == "movie" and job_kind != "bonus_disc" and not any(decision.role == "main_feature" for decision in included):
         messages.append("movie jobs require an included main feature")
+    if job_kind == "bonus_disc" and any(decision.role not in BONUS_DISC_ROLES for decision in included):
+        messages.append("bonus-disc files must use an extras-compatible role")
     if any(not decision.encoding_profile for decision in included):
         messages.append("included files require an encoding profile")
     if any(not decision.subtitle_policy for decision in included):

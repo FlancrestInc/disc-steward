@@ -115,6 +115,8 @@ class Job:
     status: str
     source_disc_path: str | None = None
     split_from_job_id: int | None = None
+    parent_job_id: int | None = None
+    job_kind: str = "standard"
 
 
 @dataclass

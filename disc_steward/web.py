@@ -517,6 +517,12 @@ def handle_job_action(db: Database, config: AppConfig, job_id: int, action: str,
         _open_path_with_system_handler(_media_path_for(config, row))
         db.audit("source_file_opened", "Opened source file from web UI", job_id, {"source_file_id": source_file_id, "path": row["path"]})
         return f"open-source-file:{source_file_id}"
+    if action == "mark-bonus-disc":
+        raw_parent_id = form.get("parent_job_id", "").strip()
+        if not raw_parent_id:
+            raise ValueError("Select the completed release this bonus disc belongs to")
+        db.set_bonus_disc_parent(job_id, int(raw_parent_id))
+        return f"redirect:/jobs/{job_id}"
     if action == "split-source-file":
         raw_source_file_id = form.get("source_file_id", "").strip()
         if not raw_source_file_id:
@@ -570,7 +576,7 @@ def handle_job_action(db: Database, config: AppConfig, job_id: int, action: str,
                 decision.generated_final_path = str(generated.final_path)
                 decision.conflicts = generated.conflicts
         if action == "mark-reviewed":
-            validate_review_ready(job_review, decisions, paths)
+            validate_review_ready(job_review, decisions, paths, job_kind=(db.get_job(job_id).job_kind if db.get_job(job_id) else "standard"))
         db.save_job_review(job_review)
         for decision in decisions:
             db.save_file_review(decision)
@@ -583,7 +589,7 @@ def handle_job_action(db: Database, config: AppConfig, job_id: int, action: str,
     if action == "create-work-orders":
         job_review, decisions = parse_review_form(db, config, job_id, form, "ready_for_fileflows")
         paths = generate_final_paths(config, job_review, decisions)
-        validate_review_ready(job_review, decisions, paths)
+        validate_review_ready(job_review, decisions, paths, job_kind=(db.get_job(job_id).job_kind if db.get_job(job_id) else "standard"))
         db.save_job_review(job_review)
         for decision in decisions:
             generated = paths.get(decision.source_file_id)
@@ -1025,7 +1031,27 @@ def _render_job_review_summary_strip(
           <button form="job-review-form" class="ds-button" formaction="/jobs/{job.id}/split-source-file" formmethod="post">Create split job</button>
         </div>
         """
+    bonus_disc_html = ""
+    if job.job_kind == "bonus_disc":
+        parent_label = f"job {job.parent_job_id}" if job.parent_job_id else "unlinked"
+        bonus_disc_html = f"<p class='lookup-strip'><strong>Bonus disc</strong> · parent release: {escape(parent_label)}. Main feature is inherited from the parent release; review only extras here.</p>"
+    elif job.status in {"review_needed", "review_in_progress"}:
+        parent_options = "".join(
+            f'<option value="{candidate.id}">Job {candidate.id}: {escape(candidate.disc_title)}</option>'
+            for candidate in db.list_jobs()
+            if candidate.id != job.id and candidate.status == "imported_to_jellyfin"
+        )
+        if parent_options:
+            bonus_disc_html = f"""
+            <form class="lookup-strip" method="post" action="/jobs/{job.id}/mark-bonus-disc">
+              <strong>Bonus disc?</strong>
+              <span class="muted">Link this extras-only disc to an already imported release to remove the main-feature requirement.</span>
+              <select name="parent_job_id" required><option value="">Select parent release</option>{parent_options}</select>
+              <button class="ds-button" type="submit">Mark as bonus disc</button>
+            </form>
+            """
     summary_actions_html = f"""
+      {bonus_disc_html}
       <div class="inline-form job-summary-actions">
         <button form="job-review-form" class="ds-button" formaction="/jobs/{job.id}/open-job-folder" formmethod="post">Open job folder</button>
         <button form="job-review-form" class="ds-button" formaction="/jobs/{job.id}/rescan-job" formmethod="post">Rescan job folder</button>

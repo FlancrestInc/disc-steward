@@ -29,6 +29,8 @@ class Database:
                     disc_path TEXT NOT NULL UNIQUE,
                     source_disc_path TEXT,
                     split_from_job_id INTEGER,
+                    parent_job_id INTEGER,
+                    job_kind TEXT NOT NULL DEFAULT 'standard',
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -355,6 +357,8 @@ class Database:
             self._ensure_column(conn, "job_reviews", "title_discovery_json", "TEXT")
             self._ensure_column(conn, "disc_jobs", "source_disc_path", "TEXT")
             self._ensure_column(conn, "disc_jobs", "split_from_job_id", "INTEGER")
+            self._ensure_column(conn, "disc_jobs", "parent_job_id", "INTEGER")
+            self._ensure_column(conn, "disc_jobs", "job_kind", "TEXT NOT NULL DEFAULT 'standard'")
             self._ensure_column(conn, "transfer_items", "verification", "TEXT NOT NULL DEFAULT 'none'")
             self._ensure_column(conn, "source_files", "preview_status", "TEXT NOT NULL DEFAULT 'missing'")
             self._ensure_column(conn, "source_files", "preview_path", "TEXT")
@@ -579,7 +583,7 @@ class Database:
 
     def list_jobs(self) -> list[Job]:
         with self.connect() as conn:
-            rows = conn.execute("SELECT id, disc_title, disc_path, status, source_disc_path, split_from_job_id FROM disc_jobs ORDER BY id").fetchall()
+            rows = conn.execute("SELECT id, disc_title, disc_path, status, source_disc_path, split_from_job_id, parent_job_id, job_kind FROM disc_jobs ORDER BY id").fetchall()
         return [
             Job(
                 id=row["id"],
@@ -588,6 +592,8 @@ class Database:
                 status=row["status"],
                 source_disc_path=row["source_disc_path"],
                 split_from_job_id=row["split_from_job_id"],
+                parent_job_id=row["parent_job_id"],
+                job_kind=row["job_kind"] or "standard",
             )
             for row in rows
         ]
@@ -595,7 +601,7 @@ class Database:
     def get_job(self, job_id: int) -> Job | None:
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT id, disc_title, disc_path, status, source_disc_path, split_from_job_id FROM disc_jobs WHERE id = ?",
+                "SELECT id, disc_title, disc_path, status, source_disc_path, split_from_job_id, parent_job_id, job_kind FROM disc_jobs WHERE id = ?",
                 (job_id,),
             ).fetchone()
         if row is None:
@@ -607,7 +613,59 @@ class Database:
             status=row["status"],
             source_disc_path=row["source_disc_path"],
             split_from_job_id=row["split_from_job_id"],
+            parent_job_id=row["parent_job_id"],
+            job_kind=row["job_kind"] or "standard",
         )
+
+    def set_bonus_disc_parent(self, job_id: int, parent_job_id: int) -> None:
+        if job_id == parent_job_id:
+            raise ValueError("A job cannot be its own bonus-disc parent")
+        with self.connect() as conn:
+            job = conn.execute("SELECT id, status FROM disc_jobs WHERE id = ?", (job_id,)).fetchone()
+            parent = conn.execute("SELECT id, status FROM disc_jobs WHERE id = ?", (parent_job_id,)).fetchone()
+            if job is None or parent is None:
+                raise ValueError("Unknown bonus-disc job or parent release")
+            if parent["status"] != "imported_to_jellyfin":
+                raise ValueError("Bonus-disc parent must already be imported to Jellyfin")
+            conn.execute(
+                "UPDATE disc_jobs SET parent_job_id = ?, job_kind = 'bonus_disc', status = 'review_in_progress', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (parent_job_id, job_id),
+            )
+            parent_review = conn.execute("SELECT * FROM job_reviews WHERE job_id = ?", (parent_job_id,)).fetchone()
+            if parent_review is None:
+                raise ValueError("Bonus-disc parent has no release review metadata")
+            conn.execute(
+                """
+                INSERT INTO job_reviews (
+                    job_id, title, original_title, romanized_title, translated_title, language_script_hints,
+                    anime_flag, japanese_media_flag, confidence, manual_review_notes, title_discovery_json, year, content_type, library_root,
+                    imdb_id, tmdb_id, tvdb_id, anidb_id, anilist_id, mal_id, notes, review_status,
+                    work_order_folder, work_order_created_at, warnings_json, conflicts_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, '[]', '[]')
+                ON CONFLICT(job_id) DO UPDATE SET
+                    title=excluded.title, original_title=excluded.original_title, romanized_title=excluded.romanized_title,
+                    translated_title=excluded.translated_title, language_script_hints=excluded.language_script_hints,
+                    anime_flag=excluded.anime_flag, japanese_media_flag=excluded.japanese_media_flag,
+                    confidence=excluded.confidence, title_discovery_json=excluded.title_discovery_json,
+                    year=excluded.year, content_type=excluded.content_type, library_root=excluded.library_root,
+                    imdb_id=excluded.imdb_id, tmdb_id=excluded.tmdb_id, tvdb_id=excluded.tvdb_id,
+                    anidb_id=excluded.anidb_id, anilist_id=excluded.anilist_id, mal_id=excluded.mal_id,
+                    notes=excluded.notes, review_status=excluded.review_status, work_order_folder=NULL,
+                    work_order_created_at=NULL, warnings_json='[]', conflicts_json='[]', updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    job_id, parent_review["title"], parent_review["original_title"], parent_review["romanized_title"],
+                    parent_review["translated_title"], parent_review["language_script_hints"], parent_review["anime_flag"],
+                    parent_review["japanese_media_flag"], parent_review["confidence"], f"Bonus disc for job {parent_job_id}",
+                    parent_review["title_discovery_json"], parent_review["year"], parent_review["content_type"], parent_review["library_root"],
+                    parent_review["imdb_id"], parent_review["tmdb_id"], parent_review["tvdb_id"], parent_review["anidb_id"],
+                    parent_review["anilist_id"], parent_review["mal_id"], f"Bonus disc for job {parent_job_id}", "review_in_progress",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO audit_log (job_id, event_type, message, payload_json) VALUES (?, ?, ?, ?)",
+                (job_id, "bonus_disc_linked", f"Linked bonus disc to parent release job {parent_job_id}", json.dumps({"parent_job_id": parent_job_id}, ensure_ascii=False)),
+            )
 
     def find_other_jobs_referencing_source_folder(self, source_folder: str | Path, exclude_job_id: int) -> list[Job]:
         canonical_source = Path(source_folder).resolve(strict=False)
@@ -1058,6 +1116,8 @@ class Database:
                     dj.disc_path,
                     dj.source_disc_path,
                     dj.split_from_job_id,
+                    dj.parent_job_id,
+                    dj.job_kind,
                     dj.status,
                     COALESCE(jr.review_status, dj.status, 'review_needed') AS review_status,
                     COUNT(sf.id) AS scanned_file_count,
@@ -1083,7 +1143,7 @@ class Database:
                 LEFT JOIN source_files sf ON sf.job_id = dj.id
                 LEFT JOIN classifications c ON c.source_file_id = sf.id
                 LEFT JOIN job_reviews jr ON jr.job_id = dj.id
-                GROUP BY dj.id, dj.disc_title, dj.disc_path, dj.source_disc_path, dj.split_from_job_id, dj.status, jr.review_status
+                GROUP BY dj.id, dj.disc_title, dj.disc_path, dj.source_disc_path, dj.split_from_job_id, dj.parent_job_id, dj.job_kind, dj.status, jr.review_status
                 ORDER BY dj.id
                 """
             ).fetchall()

@@ -15,7 +15,8 @@ from disc_steward.metadata import metadata_provider_status
 from disc_steward.models import AudioStream, FileReviewDecision, JobReviewMetadata, ScannedFile, SubtitleStream, TitleDiscoveryResult, TitleDiscoverySignal, VideoInfo
 from disc_steward.status import build_status_summary
 from disc_steward.web import render_job_review
-from disc_steward.work_orders import generate_final_paths
+from disc_steward.work_orders import GeneratedPath, generate_final_paths
+from disc_steward.review import validate_review_ready
 
 
 def _config(tmp_path: Path) -> AppConfig:
@@ -635,6 +636,31 @@ def test_archive_path_verification_behavior(tmp_path):
     raw_item = next(item for item in summary.eligible if item.path == str(raw))
     assert raw_item.archive_path.endswith("Raw Archive/DISC/movie.mkv")
     assert raw.exists()
+
+
+def test_bonus_disc_links_parent_and_skips_main_feature_requirement(tmp_path):
+    db = Database(tmp_path / "bonus.sqlite3")
+    db.initialize()
+    parent_id = db.upsert_job(tmp_path / "parent", "scanned")
+    bonus_id = db.upsert_job(tmp_path / "bonus", "review_needed")
+    db.save_job_review(JobReviewMetadata(job_id=parent_id, title="The Lego Movie", year=2014, content_type="movie", review_status="reviewed"))
+    db.update_job_status(parent_id, "imported_to_jellyfin")
+
+    db.set_bonus_disc_parent(bonus_id, parent_id)
+
+    bonus = db.get_job(bonus_id)
+    assert bonus is not None
+    assert bonus.job_kind == "bonus_disc"
+    assert bonus.parent_job_id == parent_id
+    assert db.get_job_review(bonus_id).title == "The Lego Movie"
+
+    decisions = [FileReviewDecision(source_file_id=1, role="featurette", content_type="movie", encoding_profile="default", subtitle_policy="preserve_existing")]
+    validate_review_ready(
+        db.get_job_review(bonus_id),
+        decisions,
+        {1: GeneratedPath(1, Path("Movies/Test/featurettes/file.mkv"), "featurette")},
+        job_kind=bonus.job_kind,
+    )
 
 
 def test_status_command_summary_counts_jobs_and_outstanding_issues(tmp_path):
