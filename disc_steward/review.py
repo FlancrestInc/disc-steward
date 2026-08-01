@@ -5,7 +5,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Iterable
 
-from .models import Classification, FileReviewDecision, GeneratedPath, JobReviewMetadata, SubtitlePolicySuggestion
+from .models import Classification, FileReviewDecision, GeneratedPath, JobReviewMetadata, ScannedFile, SubtitlePolicySuggestion
 
 
 REVIEW_STATUSES = {
@@ -72,6 +72,94 @@ BONUS_DISC_ROLES = {
     "commentary_variant",
     "menu_or_bumper",
 }
+
+
+def seed_automatic_review(
+    db,
+    config,
+    job_id: int,
+    scanned_files: list[ScannedFile],
+    classifications: dict[str, Classification],
+) -> dict[str, list[str]]:
+    """Populate safe, reversible review defaults for a newly scanned job.
+
+    This does not mark a job reviewed or create work orders, and it never
+    overwrites a value already saved by the operator.
+    """
+    applied: dict[str, list[str]] = {}
+    saved = {decision.source_file_id: decision for decision in db.list_file_reviews(job_id)}
+    source_ids = {row["path"]: int(row["id"]) for row in db.source_file_payloads(job_id)}
+
+    for scanned in scanned_files:
+        source_file_id = source_ids.get(scanned.path)
+        if source_file_id is None:
+            continue
+        decision = saved.get(source_file_id) or FileReviewDecision(source_file_id=source_file_id)
+        classification = classifications[scanned.path]
+        fields: list[str] = []
+        role = _automatic_role(scanned, classification)
+        content_type = "movie" if role == "main_feature" else "extra" if role else "unknown"
+        display_name = _automatic_display_name(scanned, role)
+        subtitle_policy = suggest_subtitle_policy(
+            classification,
+            [stream.language for stream in scanned.audio_streams],
+            [stream.codec for stream in scanned.subtitle_streams],
+        ).policy
+
+        def set_if_blank(field_name: str, value: object) -> None:
+            if value in {None, ""}:
+                return
+            if getattr(decision, field_name) in {None, "", "unknown"}:
+                setattr(decision, field_name, value)
+                fields.append(field_name)
+
+        set_if_blank("role", role)
+        set_if_blank("content_type", content_type)
+        set_if_blank("final_display_name", display_name)
+        set_if_blank("encoding_profile", config.preferred_video_profile)
+        set_if_blank("subtitle_policy", subtitle_policy)
+        if classification.reasons and not decision.notes:
+            decision.notes = "Automatic scan: " + "; ".join(classification.reasons)
+            fields.append("notes")
+        if fields:
+            db.save_file_review(decision)
+            applied[f"file:{source_file_id}"] = fields
+
+    if applied:
+        db.audit(
+            "automatic_review_seed",
+            f"Seeded automatic review defaults for {len(applied)} file(s)",
+            job_id,
+            {"applied_fields": applied},
+        )
+    return applied
+
+
+def _automatic_role(scanned: ScannedFile, classification: Classification) -> str:
+    title = " ".join([scanned.filename, scanned.embedded_title or "", scanned.makemkv_title or ""]).lower()
+    if classification.probable_main_feature and not classification.possible_alternate_cut:
+        return "main_feature"
+    if classification.probable_trailer or any(token in title for token in ("trailer", "teaser", "promo")):
+        return "trailer"
+    if classification.possible_commentary_variant or "commentary" in title:
+        return "commentary_variant"
+    if classification.probable_menu_or_bumper:
+        return "menu_or_bumper"
+    if classification.probable_featurette:
+        return "featurette"
+    if classification.probable_extra:
+        return "extra"
+    return ""
+
+
+def _automatic_display_name(scanned: ScannedFile, role: str) -> str:
+    for value in (scanned.embedded_title, scanned.makemkv_title):
+        if value and value.strip():
+            return value.strip()
+    stem = scanned.filename.rsplit(".", 1)[0].replace("_", " ").replace(".", " ").replace("-", " ").strip()
+    if stem.lower() in {"title", "title t00", "title_t00", "video"}:
+        return {"trailer": "Trailer", "featurette": "Featurette", "menu_or_bumper": "Menu / bumper"}.get(role, "")
+    return stem
 
 
 def validate_review_ready(

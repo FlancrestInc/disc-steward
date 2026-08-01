@@ -15,6 +15,7 @@ from .models import AudioStream, ScannedFile, SubtitleStream, VideoInfo
 from .title_discovery import discover_title_from_scan, refine_title_discovery_with_ollama
 from .notifications import send_notification
 from .preview import queue_previews_for_job
+from .review import seed_automatic_review
 
 LOG = logging.getLogger(__name__)
 
@@ -184,7 +185,9 @@ def scan_disc_folder(
         discovery = refine_title_discovery_with_ollama(config, discovery, sender=title_discovery_sender)
     review = db.get_job_review(job_id)
     review.title_discovery_json = asdict(discovery)
+    _apply_title_discovery_defaults(review, discovery, disc_folder.name)
     db.save_job_review(review)
+    seed_automatic_review(db, config, job_id, scanned_files, classifications)
     db.audit(
         "title_discovery",
         f"Discovered title candidate '{discovery.title or review.title}' with {len(discovery.signals)} signal(s)",
@@ -214,6 +217,26 @@ def scan_disc_folder(
         except Exception as error:
             db.audit("metadata_lookup_failed", str(error), job_id)
     return job_id
+
+
+def _apply_title_discovery_defaults(review, discovery, folder_name: str) -> None:
+    """Copy scan-derived title fields into blank/default review fields only."""
+    values = {
+        "title": discovery.title,
+        "original_title": discovery.original_title,
+        "romanized_title": discovery.romanized_title,
+        "translated_title": discovery.translated_title,
+        "year": discovery.year,
+        "content_type": discovery.content_type,
+        "library_root": discovery.library_root,
+        "confidence": discovery.confidence,
+    }
+    for field_name, value in values.items():
+        if value in {None, "", "unknown"}:
+            continue
+        current = getattr(review, field_name)
+        if current in {None, "", "unknown"} or (field_name == "title" and current == folder_name):
+            setattr(review, field_name, value)
 
 
 def _folder_latest_mtime(folder: Path) -> float | None:
