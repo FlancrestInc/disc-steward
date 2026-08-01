@@ -131,6 +131,8 @@ The job list shows each scanned disc folder, status, file count, likely main fea
 
 At the disc level, enter or confirm the title, original/romanized/translated titles, year, content type, library root/category, IMDb/TMDb/TVDb/AniDB/AniList/MAL IDs, Japanese/anime hints, and notes. When metadata lookup is enabled, Disc Steward can run a best-effort TMDb/AniList lookup after scanning or from the review page's `Lookup All` button. High-confidence matches fill blank/default fields, while ambiguous matches are stored as candidates for review.
 
+Incoming scans also seed the review form automatically from the ffprobe classification: likely main features, trailers, featurettes, menu/bumper items, and other extras receive an initial role and display name, and every labeled file receives the configured encoding profile plus a subtitle policy suggestion. The seed is idempotent and only fills blank fields, so it will not overwrite corrections made during a rescan. It never marks the job reviewed or starts processing; the operator still confirms the labels and explicitly sends the job onward.
+
 At the file level, choose or confirm the role, display name, optional final filename override, content type, extra type, season/episode/sort order, encoding profile, subtitle policy, include/exclude decision, per-file metadata IDs, title overrides, and notes. Each file card includes a best-effort inline HTML5 player plus a native file path for external playback when the browser cannot play the source MKV. Ignoring a file stores only a review decision; it does not delete or hide the source file permanently.
 
 Subtitle policy suggestions are based on scan findings:
