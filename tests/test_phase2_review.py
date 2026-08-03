@@ -128,8 +128,8 @@ def test_review_page_renders_job_summary_counts(tmp_path):
     assert "Back to jobs" in html
     assert "Advanced file details" in html
     assert "Destination preview" in html
-    assert "Processing and transfer" not in html
-    assert "Metadata automation and cleanup" not in html
+    assert "Processing and transfer" in html
+    assert "Metadata automation and cleanup" in html
     assert "lookup-strip advanced-card" in html
     assert 'lookup-strip advanced-card" open' not in html
     assert html.count('<details class="advanced-panel file-advanced ds-motion-disclosure">') >= 1

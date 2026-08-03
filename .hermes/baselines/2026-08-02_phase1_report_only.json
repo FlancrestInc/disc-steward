@@ -1,0 +1,1171 @@
+{
+  "read_only": true,
+  "jobs": {
+    "55": {
+      "inventory": {
+        "release_key": "clone-wars-s1-disc1",
+        "title": "Star Wars: The Clone Wars",
+        "candidate_titles": [
+          "Ambush",
+          "Rising Malevolence",
+          "Shadow of Malevolence",
+          "Destroy Malevolence"
+        ],
+        "sources": [
+          {
+            "url": "https://en.wikipedia.org/wiki/Star_Wars:_The_Clone_Wars_(2008_TV_series)",
+            "title": "Home media / episode list",
+            "retrieved_at": null
+          }
+        ],
+        "warnings": [
+          "Source documents first DVD release as Episodes 1–4; exact disc/file structure requires media reconciliation."
+        ]
+      },
+      "aggregate_relations": [],
+      "assignments": [
+        {
+          "source_file_id": 609,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.3354094378945104,
+          "reasons": [
+            "no candidate met the duration threshold"
+          ]
+        },
+        {
+          "source_file_id": 610,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.020734999999999948,
+          "reasons": [
+            "no candidate met the duration threshold"
+          ]
+        },
+        {
+          "source_file_id": 611,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.32427571428571433,
+          "reasons": [
+            "no candidate met the duration threshold"
+          ]
+        },
+        {
+          "source_file_id": 612,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.07693357142857138,
+          "reasons": [
+            "no candidate met the duration threshold"
+          ]
+        },
+        {
+          "source_file_id": 613,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.050312142857142805,
+          "reasons": [
+            "no candidate met the duration threshold"
+          ]
+        },
+        {
+          "source_file_id": 614,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.10596285714285714,
+          "reasons": [
+            "no candidate met the duration threshold"
+          ]
+        },
+        {
+          "source_file_id": 615,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.1743407142857143,
+          "reasons": [
+            "no candidate met the duration threshold"
+          ]
+        },
+        {
+          "source_file_id": 616,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0022857142857143353,
+          "reasons": [
+            "no candidate met the duration threshold"
+          ]
+        },
+        {
+          "source_file_id": 617,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.023975714285714322,
+          "reasons": [
+            "no candidate met the duration threshold"
+          ]
+        }
+      ],
+      "unmatched_candidate_ids": [
+        "clone-wars-s1-disc1:s01e01",
+        "clone-wars-s1-disc1:s01e02",
+        "clone-wars-s1-disc1:s01e03",
+        "clone-wars-s1-disc1:s01e04"
+      ],
+      "warnings": [],
+      "media_evidence": [
+        {
+          "source_file_id": 609,
+          "filename": "AD1_t00.mkv",
+          "subtitle_streams": [
+            {
+              "index": 6,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 7,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 8,
+              "codec": "dvd_subtitle",
+              "language": "spa",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 9,
+              "codec": "dvd_subtitle",
+              "language": "fre",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 10,
+              "codec": "subrip",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "bounded subtitle sample extraction timed out",
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 610,
+          "filename": "AD1_t01.mkv",
+          "subtitle_streams": [],
+          "excerpts": [],
+          "warnings": []
+        },
+        {
+          "source_file_id": 611,
+          "filename": "CD1_t05.mkv",
+          "subtitle_streams": [
+            {
+              "index": 2,
+              "codec": "subrip",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [
+            {
+              "start_seconds": 3.453,
+              "end_seconds": 6.054,
+              "text": "<i>[ Yoda Narrating ]</i> <i>THE SHROUD OF THE DARK SIDE</i> <i>HAS FALLEN.</i>",
+              "reason": "first subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 43.543,
+              "end_seconds": 46.344,
+              "text": "<i>IN THE HISTORY</i> <i>OF THE</i> STAR WARS<i> UNIVERSE.</i>",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 46.413,
+              "end_seconds": 49.447,
+              "text": "<i>AND, UH, OBVIOUSLY</i> <i>BECAUSE IT'S A WAR,</i>",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 49.516,
+              "end_seconds": 52.917,
+              "text": "<i>THERE'S A LOT OF ACTION</i> <i>AND A LOT OF ADVENTURE</i> <i>AND A LOT OF THINGS GOING ON.</i>",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 55.422,
+              "end_seconds": 58.957,
+              "text": "WE KIND OF START THE CLONE WAR IN ONE EPISODE.",
+              "reason": "title-like subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 59.026,
+              "end_seconds": 62.093,
+              "text": "WE END IT IN THE NEXT EPISODE, BUT WE NEVER ACTUALLY SEE THE WAR.",
+              "reason": "title-like subtitle cue",
+              "language": "eng"
+            }
+          ],
+          "warnings": []
+        },
+        {
+          "source_file_id": 612,
+          "filename": "CD4_t06.mkv",
+          "subtitle_streams": [
+            {
+              "index": 2,
+              "codec": "subrip",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [
+            {
+              "start_seconds": 6.907,
+              "end_seconds": 9.591,
+              "text": "<i>[ Wind Whistling ]</i>",
+              "reason": "first subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 22.056,
+              "end_seconds": 24.623,
+              "text": "<i>FOR OVER A THOUSAND GENERATIONS,</i> <i>THE JEDI KNIGHTS...</i>",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 24.692,
+              "end_seconds": 27.859,
+              "text": "WERE THE GUARDIANS OF PEACE AND JUSTICE IN THE OLD REPUBLIC,",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 38.355,
+              "end_seconds": 41.956,
+              "text": "<i>HELPED THE EMPIRE HUNT DOWN</i> <i>AND DESTROY THE JEDI KNIGHTS.</i>",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 42.025,
+              "end_seconds": 45.494,
+              "text": "VADER WAS SEDUCED BY THE DARK SIDE OF THE FORCE.",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 57.791,
+              "end_seconds": 60.058,
+              "text": "<i>[ Sidious ]</i> <i>LORD VADER.</i>",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            }
+          ],
+          "warnings": []
+        },
+        {
+          "source_file_id": 613,
+          "filename": "DD1_t02.mkv",
+          "subtitle_streams": [
+            {
+              "index": 2,
+              "codec": "subrip",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [
+            {
+              "start_seconds": 20.621,
+              "end_seconds": 24.722,
+              "text": "<i>♪♪ [ Vocalizing ]</i>",
+              "reason": "first subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 43.177,
+              "end_seconds": 45.677,
+              "text": "<i>[ Palpatine ]</i> <i>I SEE YOU BECOMING</i> <i>THE GREATEST OF ALL THE JEDI.</i>",
+              "reason": "last subtitle cue",
+              "language": "eng"
+            }
+          ],
+          "warnings": []
+        },
+        {
+          "source_file_id": 614,
+          "filename": "DD2_t03.mkv",
+          "subtitle_streams": [
+            {
+              "index": 2,
+              "codec": "subrip",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [
+            {
+              "start_seconds": 3.737,
+              "end_seconds": 6.604,
+              "text": "<i>[ Man ] NEGATIVE, 38.</i> <i>BACKUP UNAVAILABLE. YOU HAVE</i> <i>A GREEN LIGHT TO ENGAGE.</i>",
+              "reason": "first subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 40.774,
+              "end_seconds": 42.774,
+              "text": "DELTA SQUAD, EXECUTE DOOR BREACH.",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 45.145,
+              "end_seconds": 47.145,
+              "text": "COMMENCING DOOR BREACH MANEUVER.",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 47.214,
+              "end_seconds": 49.613,
+              "text": "- KEEP ME COVERED. - ROGER THAT.",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 58.425,
+              "end_seconds": 61.125,
+              "text": "-<i> [ Man Yells ]</i> -<i> GONNA SEE.</i> <i> THREW OFF SOME ENEMIES.</i>",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 62.296,
+              "end_seconds": 66.03,
+              "text": "- DOWN! - WATCH OUT! DROIDS ENCOUNTERED.",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            }
+          ],
+          "warnings": []
+        },
+        {
+          "source_file_id": 615,
+          "filename": "ED1_t04.mkv",
+          "subtitle_streams": [
+            {
+              "index": 2,
+              "codec": "subrip",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [
+            {
+              "start_seconds": 3.904,
+              "end_seconds": 7.972,
+              "text": "<i>[ Artillery Firing,</i> <i> Targets Being Hit ]</i>",
+              "reason": "first subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 10.277,
+              "end_seconds": 12.477,
+              "text": "<i>[ Man ]</i> <i>LUCAS WAS INTERESTED</i> <i>IN DOING AN ANIMATED PROJECT.</i>",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 14.548,
+              "end_seconds": 16.714,
+              "text": "GEORGE WANTED OUR INTERPRETATION OF IT, TO A DEGREE.",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 16.783,
+              "end_seconds": 19.818,
+              "text": "IT'S PRETTY EXCITING NOW TO GET A CHANCE TO--",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 19.886,
+              "end_seconds": 24.423,
+              "text": "TO HELP OUT AND CONTRIBUTE TO A GIANT MYTHOLOGY LIKE<i> STAR WARS.</i>",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            },
+            {
+              "start_seconds": 24.492,
+              "end_seconds": 28.159,
+              "text": "<i>[ Tartakovsky ] AN IMPORTANT KEY</i> <i>FOR HIM IS THAT WE PUT OUR OWN</i> <i>SIGNATURE, IN A WAY, ON IT.</i>",
+              "reason": "distinctive subtitle cue",
+              "language": "eng"
+            }
+          ],
+          "warnings": []
+        },
+        {
+          "source_file_id": 616,
+          "filename": "PC1_t07.mkv",
+          "subtitle_streams": [
+            {
+              "index": 2,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 617,
+          "filename": "TC1_t08.mkv",
+          "subtitle_streams": [
+            {
+              "index": 2,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        }
+      ]
+    },
+    "33": {
+      "inventory": {
+        "release_key": "marvel-wolverine-disc1",
+        "title": "Marvel Anime: Wolverine",
+        "candidate_titles": [
+          "Mariko",
+          "Yukio",
+          "Kikyo",
+          "Omega Red",
+          "Asano",
+          "Min"
+        ],
+        "sources": [
+          {
+            "url": "https://en.wikipedia.org/wiki/List_of_Marvel_Anime_episodes",
+            "title": "Marvel Anime episode list",
+            "retrieved_at": null
+          }
+        ],
+        "warnings": []
+      },
+      "aggregate_relations": [
+        {
+          "aggregate_file_id": 379,
+          "component_file_ids": [
+            382,
+            383,
+            384,
+            385,
+            386,
+            387
+          ],
+          "duration_delta_seconds": 0.003,
+          "confidence": 0.9993999999998777
+        }
+      ],
+      "assignments": [
+        {
+          "source_file_id": 379,
+          "candidate_id": null,
+          "relation": "aggregate_duplicate_of_components",
+          "score": 0.9993999999998777,
+          "reasons": [
+            "duration matches component files 382, 383, 384, 385, 386, 387",
+            "do not import as an additional independent item"
+          ]
+        },
+        {
+          "source_file_id": 380,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.3902343145666025,
+          "reasons": [
+            "no candidate met the duration threshold"
+          ]
+        },
+        {
+          "source_file_id": 381,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.3876527756290348,
+          "reasons": [
+            "no candidate met the duration threshold"
+          ]
+        },
+        {
+          "source_file_id": 382,
+          "candidate_id": "marvel-wolverine-disc1:s01e01",
+          "relation": "direct",
+          "score": 0.9985921435704139,
+          "reasons": [
+            "duration similarity 0.999",
+            "component of aggregate file 379"
+          ]
+        },
+        {
+          "source_file_id": 383,
+          "candidate_id": "marvel-wolverine-disc1:s01e02",
+          "relation": "direct",
+          "score": 0.999296566951577,
+          "reasons": [
+            "duration similarity 0.999",
+            "component of aggregate file 379"
+          ]
+        },
+        {
+          "source_file_id": 384,
+          "candidate_id": "marvel-wolverine-disc1:s01e03",
+          "relation": "direct",
+          "score": 1.0,
+          "reasons": [
+            "duration similarity 1.000",
+            "component of aggregate file 379"
+          ]
+        },
+        {
+          "source_file_id": 385,
+          "candidate_id": "marvel-wolverine-disc1:s01e04",
+          "relation": "direct",
+          "score": 0.999296566951577,
+          "reasons": [
+            "duration similarity 0.999",
+            "component of aggregate file 379"
+          ]
+        },
+        {
+          "source_file_id": 386,
+          "candidate_id": "marvel-wolverine-disc1:s01e05",
+          "relation": "direct",
+          "score": 1.0,
+          "reasons": [
+            "duration similarity 1.000",
+            "component of aggregate file 379"
+          ]
+        },
+        {
+          "source_file_id": 387,
+          "candidate_id": "marvel-wolverine-disc1:s01e06",
+          "relation": "direct",
+          "score": 1.0,
+          "reasons": [
+            "duration similarity 1.000",
+            "component of aggregate file 379"
+          ]
+        }
+      ],
+      "unmatched_candidate_ids": [],
+      "warnings": [
+        "aggregate file 379 overlaps 6 component files"
+      ],
+      "media_evidence": [
+        {
+          "source_file_id": 379,
+          "filename": "Marvel Anime- Wolverine - Complete Series - Disc 1-A1_t00.mkv",
+          "subtitle_streams": [
+            {
+              "index": 3,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 4,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 380,
+          "filename": "Marvel Anime- Wolverine - Complete Series - Disc 1-B1_t07.mkv",
+          "subtitle_streams": [
+            {
+              "index": 2,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 381,
+          "filename": "Marvel Anime- Wolverine - Complete Series - Disc 1-B2_t08.mkv",
+          "subtitle_streams": [
+            {
+              "index": 2,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 382,
+          "filename": "Marvel Anime- Wolverine - Complete Series - Disc 1-C1_t01.mkv",
+          "subtitle_streams": [
+            {
+              "index": 3,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 4,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 383,
+          "filename": "Marvel Anime- Wolverine - Complete Series - Disc 1-C2_t02.mkv",
+          "subtitle_streams": [
+            {
+              "index": 3,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 4,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 384,
+          "filename": "Marvel Anime- Wolverine - Complete Series - Disc 1-C3_t03.mkv",
+          "subtitle_streams": [
+            {
+              "index": 3,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 4,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 385,
+          "filename": "Marvel Anime- Wolverine - Complete Series - Disc 1-C4_t04.mkv",
+          "subtitle_streams": [
+            {
+              "index": 3,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 4,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 386,
+          "filename": "Marvel Anime- Wolverine - Complete Series - Disc 1-C5_t05.mkv",
+          "subtitle_streams": [
+            {
+              "index": 3,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 4,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 387,
+          "filename": "Marvel Anime- Wolverine - Complete Series - Disc 1-C6_t06.mkv",
+          "subtitle_streams": [
+            {
+              "index": 3,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 4,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        }
+      ]
+    },
+    "38": {
+      "inventory": {
+        "release_key": "marvel-ironman-disc1",
+        "title": "Marvel Anime: Iron Man",
+        "candidate_titles": [
+          "Japan: Enter Iron Man",
+          "Going Nuclear",
+          "Reap the Whirlwind",
+          "A Twist of Memory, a Turn of the Mind",
+          "Outbreak",
+          "Technical Difficulties"
+        ],
+        "sources": [
+          {
+            "url": "https://en.wikipedia.org/wiki/List_of_Marvel_Anime_episodes",
+            "title": "Marvel Anime episode list",
+            "retrieved_at": null
+          }
+        ],
+        "warnings": []
+      },
+      "aggregate_relations": [],
+      "assignments": [
+        {
+          "source_file_id": 433,
+          "candidate_id": "marvel-ironman-disc1:s01e01",
+          "relation": "direct",
+          "score": 0.9992312713236494,
+          "reasons": [
+            "duration similarity 0.999"
+          ]
+        },
+        {
+          "source_file_id": 434,
+          "candidate_id": "marvel-ironman-disc1:s01e02",
+          "relation": "direct",
+          "score": 0.9999472825752591,
+          "reasons": [
+            "duration similarity 1.000"
+          ]
+        },
+        {
+          "source_file_id": 435,
+          "candidate_id": "marvel-ironman-disc1:s01e03",
+          "relation": "direct",
+          "score": 0.9995137764703271,
+          "reasons": [
+            "duration similarity 1.000"
+          ]
+        },
+        {
+          "source_file_id": 436,
+          "candidate_id": "marvel-ironman-disc1:s01e04",
+          "relation": "direct",
+          "score": 0.9995480317492732,
+          "reasons": [
+            "duration similarity 1.000"
+          ]
+        },
+        {
+          "source_file_id": 437,
+          "candidate_id": "marvel-ironman-disc1:s01e05",
+          "relation": "direct",
+          "score": 0.9995614053619104,
+          "reasons": [
+            "duration similarity 1.000"
+          ]
+        },
+        {
+          "source_file_id": 438,
+          "candidate_id": "marvel-ironman-disc1:s01e06",
+          "relation": "direct",
+          "score": 0.9996888245644308,
+          "reasons": [
+            "duration similarity 1.000"
+          ]
+        },
+        {
+          "source_file_id": 439,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "reasons": [
+            "no candidates remain"
+          ]
+        },
+        {
+          "source_file_id": 440,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "reasons": [
+            "no candidates remain"
+          ]
+        },
+        {
+          "source_file_id": 441,
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "reasons": [
+            "no candidates remain"
+          ]
+        }
+      ],
+      "unmatched_candidate_ids": [],
+      "warnings": [],
+      "media_evidence": [
+        {
+          "source_file_id": 433,
+          "filename": "Marvel Anime- Ironman - Complete Series - Disc 1-B1_t00.mkv",
+          "subtitle_streams": [
+            {
+              "index": 3,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 4,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 434,
+          "filename": "Marvel Anime- Ironman - Complete Series - Disc 1-B1_t01.mkv",
+          "subtitle_streams": [
+            {
+              "index": 3,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 4,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 435,
+          "filename": "Marvel Anime- Ironman - Complete Series - Disc 1-B1_t02.mkv",
+          "subtitle_streams": [
+            {
+              "index": 3,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 4,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 436,
+          "filename": "Marvel Anime- Ironman - Complete Series - Disc 1-B1_t03.mkv",
+          "subtitle_streams": [
+            {
+              "index": 3,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 4,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 437,
+          "filename": "Marvel Anime- Ironman - Complete Series - Disc 1-B1_t04.mkv",
+          "subtitle_streams": [
+            {
+              "index": 3,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 4,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 438,
+          "filename": "Marvel Anime- Ironman - Complete Series - Disc 1-B1_t05.mkv",
+          "subtitle_streams": [
+            {
+              "index": 3,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            },
+            {
+              "index": 4,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": false,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        },
+        {
+          "source_file_id": 439,
+          "filename": "Marvel Anime- Ironman - Complete Series - Disc 1-B1_t06.mkv",
+          "subtitle_streams": [],
+          "excerpts": [],
+          "warnings": []
+        },
+        {
+          "source_file_id": 440,
+          "filename": "Marvel Anime- Ironman - Complete Series - Disc 1-C1_t07.mkv",
+          "subtitle_streams": [],
+          "excerpts": [],
+          "warnings": []
+        },
+        {
+          "source_file_id": 441,
+          "filename": "Marvel Anime- Ironman - Complete Series - Disc 1-C2_t08.mkv",
+          "subtitle_streams": [
+            {
+              "index": 2,
+              "codec": "dvd_subtitle",
+              "language": "eng",
+              "title": null,
+              "default": true,
+              "forced": false,
+              "hearing_impaired": false
+            }
+          ],
+          "excerpts": [],
+          "warnings": [
+            "image subtitle stream present; OCR not run because tesseract is unavailable"
+          ]
+        }
+      ]
+    }
+  }
+}

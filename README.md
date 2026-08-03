@@ -131,7 +131,7 @@ The job list shows each scanned disc folder, status, file count, likely main fea
 
 At the disc level, enter or confirm the title, original/romanized/translated titles, year, content type, library root/category, IMDb/TMDb/TVDb/AniDB/AniList/MAL IDs, Japanese/anime hints, and notes. When metadata lookup is enabled, Disc Steward can run a best-effort TMDb/AniList lookup after scanning or from the review page's `Lookup All` button. High-confidence matches fill blank/default fields, while ambiguous matches are stored as candidates for review.
 
-Incoming scans also seed the review form automatically from the ffprobe classification: likely main features, trailers, featurettes, menu/bumper items, and other extras receive an initial role and display name, and every labeled file receives the configured encoding profile plus a subtitle policy suggestion. The seed is idempotent and only fills blank fields, so it will not overwrite corrections made during a rescan. It never marks the job reviewed or starts processing; the operator still confirms the labels and explicitly sends the job onward.
+Incoming scans also seed the review form automatically from the ffprobe classification: likely main features, trailers, featurettes, menu/bumper items, and other extras receive an initial role and display name, and every labeled file receives the configured encoding profile plus a subtitle policy suggestion. When Hermes review is enabled, Disc Steward sends every scanned file—not only files in a folder named `bonus` or `extras`—to a bounded one-shot `hermes chat` review with vision, terminal, and file toolsets enabled. Hermes returns strict JSON suggestions after inspecting the media, and Disc Steward applies only valid per-file role/title suggestions to the draft. The local OCR pass still improves title-card labels before the Hermes call and remains the fallback when Hermes is unavailable. OCR/Hermes evidence and confidence are saved in the file notes and audit log. Configure this under `automatic_review`; disabling `hermes_enabled` leaves the local OCR/heuristic pass in place. The seed is idempotent and only fills blank fields, so it will not overwrite corrections made during a rescan. It never marks the job reviewed or starts processing; the operator still confirms the labels and explicitly sends the job onward.
 
 At the file level, choose or confirm the role, display name, optional final filename override, content type, extra type, season/episode/sort order, encoding profile, subtitle policy, include/exclude decision, per-file metadata IDs, title overrides, and notes. Each file card includes a best-effort inline HTML5 player plus a native file path for external playback when the browser cannot play the source MKV. Ignoring a file stores only a review decision; it does not delete or hide the source file permanently.
 
@@ -171,6 +171,35 @@ Review actions:
 - `Reopen review` sets `review_in_progress`.
 
 Validation before review/work-order creation requires at least one included file with a role, title/year for movie/show jobs, a movie main feature for movie jobs, conflict-free final paths, and selected encoding/subtitle policies for included files.
+
+### Evidence, research, and report-only matching
+
+The Hermes-assisted identification path is deliberately advisory until an operator confirms the review. The bounded pipeline is:
+
+1. Scan metadata, durations, chapters, subtitle streams, local OCR/title-card text, and aggregate-duration relationships.
+2. Optionally collect bounded, cited web research with `automatic_review.research_enabled: true` (disabled by default). Research packets are cached per job and reused on retries.
+3. Convert cited episode and extra facts into a combined, typed inventory. Extras retain types such as deleted scenes, trailers, interviews, and featurettes; aggregate/component relationships are overlap warnings rather than one-to-one assignments.
+4. Rank cited inventories against the scanned file vector using file counts and release-specific durations. Near ties and generic inventories remain `manual_review` hypotheses.
+5. Send the structured evidence, candidate inventory, research packet, release ranking, and aggregate warnings to Hermes for visual adjudication. Actual media evidence overrides generic or release-mismatched research.
+6. Persist research packets, release rankings, and separately verified provider IDs as provenance. These records do not automatically approve labels, start processing, or overwrite operator corrections.
+
+Provider IDs are accepted only when syntactically valid and backed by an explicit matching provider URL. IDs are never invented from title similarity. The review UI exposes research, verified identities, and release-fit rankings in collapsed provenance panels.
+
+Research and matching can be exercised without changing review state with the bounded smoke check:
+
+```bash
+uv run python scripts/report_only_smoke.py
+```
+
+The smoke check opens the configured production database through SQLite read-only mode, verifies the evidence tables, and reports file counts for selected calibration/holdout jobs. It does not call Hermes, fetch research, write SQLite state, or mutate review labels.
+
+Blind holdout jobs 112 and 35 are kept separate from disclosed calibration evaluation. Their prediction artifact is:
+
+```text
+.hermes/baselines/2026-08-02_blind_holdout_predictions.json
+```
+
+It intentionally contains no identity or ground truth and reports no accuracy. Do not disclose or evaluate those identities until the blind prediction phase is complete.
 
 ## ffmpeg Work Orders
 

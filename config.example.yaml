@@ -163,6 +163,25 @@ llm:
   allow_full_subtitle_text: false
   allow_shell_commands: false
 
+# Safe, reversible review prefill for every scanned file.
+automatic_review:
+  enabled: true
+  bonus_ocr_enabled: true
+  ocr_sample_count: 3
+  ocr_max_chars: 1600
+  hermes_enabled: true
+  hermes_command: hermes
+  hermes_timeout_seconds: 300
+  hermes_batch_size: 5
+  # Research is opt-in until a concrete search backend is configured.
+  research_enabled: false
+  research_max_queries: 8
+  research_max_results_per_query: 5
+  research_max_sources: 10
+  research_max_fetched_chars: 20000
+  research_max_evidence_chars: 6000
+  research_timeout_seconds: 15
+
 jellyfin_logs:
   enabled: false
   log_path: ""

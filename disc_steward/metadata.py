@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 from .config import MetadataConfig
 from .models import FileReviewDecision, JobReviewMetadata
+from .provider_identity import verify_provider_ids
 from .review import classification_from_json
 
 
@@ -300,6 +301,13 @@ query ($id: Int, $idMal: Int, $search: String) {
 """
 
 
+def _persist_verified_candidate_ids(db, job_id: int, payload: dict) -> list[dict[str, str]]:
+    verified, rejected = verify_provider_ids(payload)
+    if verified:
+        db.save_verified_provider_ids(job_id, [item.to_dict() for item in verified])
+    return [{"provider": str(payload.get("provider") or "identity"), "message": warning} for warning in rejected]
+
+
 def lookup_job_metadata(db, config, job_id: int, providers: list[Callable] | None = None) -> MetadataLookupResult:
     if not config.metadata.enabled:
         return MetadataLookupResult()
@@ -317,7 +325,9 @@ def lookup_job_metadata(db, config, job_id: int, providers: list[Callable] | Non
             warnings.append({"provider": provider_name, "message": str(error)})
     db.clear_metadata_candidates(job_id)
     for candidate in candidates:
-        db.save_metadata_candidate(job_id, candidate.provider, _candidate_payload(candidate))
+        payload = _candidate_payload(candidate)
+        db.save_metadata_candidate(job_id, candidate.provider, payload)
+        warnings.extend(_persist_verified_candidate_ids(db, job_id, payload))
     applied_fields: dict[str, list[str]] = {}
     best_candidate = _best_auto_candidate(candidates)
     if best_candidate is not None:
@@ -355,7 +365,9 @@ def lookup_file_metadata(
             warnings.append({"provider": provider_name, "message": str(error)})
     db.clear_metadata_candidates(job_id, source_file_id)
     for candidate in candidates:
-        db.save_metadata_candidate(job_id, candidate.provider, _candidate_payload(candidate), source_file_id)
+        payload = _candidate_payload(candidate)
+        db.save_metadata_candidate(job_id, candidate.provider, payload, source_file_id)
+        warnings.extend(_persist_verified_candidate_ids(db, job_id, payload))
     applied_fields: dict[str, list[str]] = {}
     best_candidate = _best_auto_candidate(candidates)
     if best_candidate is not None:

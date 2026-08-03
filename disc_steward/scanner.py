@@ -15,7 +15,7 @@ from .models import AudioStream, ScannedFile, SubtitleStream, VideoInfo
 from .title_discovery import discover_title_from_scan, refine_title_discovery_with_ollama
 from .notifications import send_notification
 from .preview import queue_previews_for_job
-from .review import seed_automatic_review
+from .job_review_automation import run_automatic_review
 
 LOG = logging.getLogger(__name__)
 
@@ -160,6 +160,8 @@ def scan_disc_folder(
     ffprobe_runner: Callable[[Path], str] | None = None,
     metadata_lookup: Callable[[Database, AppConfig, int], object] | None = None,
     title_discovery_sender: Callable[[str, dict], dict] | None = None,
+    bonus_text_extractor: Callable[[ScannedFile], str] | None = None,
+    hermes_review: Callable[..., dict] | None = None,
 ) -> int | None:
     db.initialize()
     resolved_disc_folder = str(disc_folder.resolve())
@@ -187,7 +189,21 @@ def scan_disc_folder(
     review.title_discovery_json = asdict(discovery)
     _apply_title_discovery_defaults(review, discovery, disc_folder.name)
     db.save_job_review(review)
-    seed_automatic_review(db, config, job_id, scanned_files, classifications)
+    if config.automatic_review.hermes_enabled and hermes_review is None:
+        db.enqueue_hermes_review_job(job_id)
+        db.audit("hermes_review_queued", "Queued Hermes review for all files after scan", job_id)
+    else:
+        run_automatic_review(
+            db,
+            config,
+            job_id,
+            scanned_files,
+            classifications,
+            source_ids,
+            disc_folder.name,
+            text_extractor=bonus_text_extractor,
+            hermes_review=hermes_review,
+        )
     db.audit(
         "title_discovery",
         f"Discovered title candidate '{discovery.title or review.title}' with {len(discovery.signals)} signal(s)",

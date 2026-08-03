@@ -236,9 +236,44 @@ class Database:
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     dismissed INTEGER NOT NULL DEFAULT 0
                 );
+                CREATE TABLE IF NOT EXISTS research_packets (
+                    job_id INTEGER PRIMARY KEY REFERENCES disc_jobs(id) ON DELETE CASCADE,
+                    status TEXT NOT NULL,
+                    packet_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS release_rankings (
+                    job_id INTEGER PRIMARY KEY REFERENCES disc_jobs(id) ON DELETE CASCADE,
+                    ranking_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS verified_provider_ids (
+                    id INTEGER PRIMARY KEY,
+                    job_id INTEGER NOT NULL REFERENCES disc_jobs(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL,
+                    provider_id TEXT NOT NULL,
+                    provider_url TEXT NOT NULL,
+                    evidence_url TEXT NOT NULL,
+                    confidence REAL NOT NULL DEFAULT 0,
+                    verification TEXT NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(job_id, provider, provider_id)
+                );
                 CREATE TABLE IF NOT EXISTS automation_jobs (
                     job_id INTEGER PRIMARY KEY REFERENCES disc_jobs(id) ON DELETE CASCADE,
                     force_reprocess INTEGER NOT NULL DEFAULT 0,
+                    state TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_result TEXT,
+                    last_error TEXT,
+                    queued_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS hermes_review_jobs (
+                    job_id INTEGER PRIMARY KEY REFERENCES disc_jobs(id) ON DELETE CASCADE,
                     state TEXT NOT NULL,
                     attempts INTEGER NOT NULL DEFAULT 0,
                     last_result TEXT,
@@ -779,6 +814,85 @@ class Database:
                 """
             )
             return cursor.rowcount
+
+    def enqueue_hermes_review_job(self, job_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO hermes_review_jobs (
+                    job_id, state, attempts, last_result, last_error,
+                    queued_at, started_at, finished_at, updated_at
+                ) VALUES (?, 'queued', 0, NULL, NULL, CURRENT_TIMESTAMP, NULL, NULL, CURRENT_TIMESTAMP)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    state = CASE
+                        WHEN hermes_review_jobs.state = 'running' THEN hermes_review_jobs.state
+                        ELSE 'queued'
+                    END,
+                    last_error = NULL,
+                    last_result = NULL,
+                    started_at = CASE
+                        WHEN hermes_review_jobs.state = 'running' THEN hermes_review_jobs.started_at
+                        ELSE NULL
+                    END,
+                    finished_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (job_id,),
+            )
+
+    def claim_next_hermes_review_job(self) -> dict | None:
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT job_id, state, attempts FROM hermes_review_jobs WHERE state = 'queued' ORDER BY queued_at, job_id LIMIT 1"
+            ).fetchone()
+            if row is None:
+                conn.commit()
+                return None
+            conn.execute(
+                """
+                UPDATE hermes_review_jobs
+                SET state = 'running', attempts = attempts + 1,
+                    started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE job_id = ?
+                """,
+                (row["job_id"],),
+            )
+            conn.commit()
+        return {key: row[key] for key in row.keys()}
+
+    def finish_hermes_review_job(self, job_id: int, *, state: str, result: str | None = None, error: str | None = None) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE hermes_review_jobs
+                SET state = ?, last_result = ?, last_error = ?,
+                    finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE job_id = ?
+                """,
+                (state, result, error, job_id),
+            )
+
+    def reset_stuck_hermes_review_jobs(self) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE hermes_review_jobs
+                SET state = 'queued', started_at = NULL, finished_at = NULL,
+                    last_error = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE state = 'running'
+                """
+            )
+            return cursor.rowcount
+
+    def get_hermes_review_job(self, job_id: int) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT job_id, state, attempts, last_result, last_error, queued_at, started_at, finished_at, updated_at FROM hermes_review_jobs WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+        return {key: row[key] for key in row.keys()} if row else None
 
     def get_automation_job(self, job_id: int) -> dict | None:
         with self.connect() as conn:
@@ -1679,6 +1793,96 @@ class Database:
                 """
             )
             return cursor.rowcount
+
+    def save_research_packet(self, job_id: int, packet: dict) -> None:
+        status = str(packet.get("status", "unknown"))
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO research_packets (job_id, status, packet_json)
+                VALUES (?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    status=excluded.status,
+                    packet_json=excluded.packet_json,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (job_id, status, json.dumps(packet, ensure_ascii=False)),
+            )
+
+    def get_research_packet(self, job_id: int) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT status, packet_json, updated_at FROM research_packets WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        packet = json.loads(row["packet_json"] or "{}")
+        packet.setdefault("status", row["status"])
+        packet.setdefault("updated_at", row["updated_at"])
+        return packet
+
+    def save_release_ranking(self, job_id: int, ranking: dict) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO release_rankings (job_id, ranking_json)
+                VALUES (?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    ranking_json=excluded.ranking_json,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (job_id, json.dumps(ranking, ensure_ascii=False)),
+            )
+
+    def get_release_ranking(self, job_id: int) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT ranking_json, updated_at FROM release_rankings WHERE job_id = ?", (job_id,)).fetchone()
+        if row is None:
+            return None
+        ranking = json.loads(row["ranking_json"] or "{}")
+        ranking.setdefault("updated_at", row["updated_at"])
+        return ranking
+
+    def save_verified_provider_ids(self, job_id: int, identities: list[dict]) -> None:
+        with self.connect() as conn:
+            for identity in identities:
+                conn.execute(
+                    """
+                    INSERT INTO verified_provider_ids
+                    (job_id, provider, provider_id, provider_url, evidence_url, confidence, verification, payload_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(job_id, provider, provider_id) DO UPDATE SET
+                        provider_url=excluded.provider_url,
+                        evidence_url=excluded.evidence_url,
+                        confidence=excluded.confidence,
+                        verification=excluded.verification,
+                        payload_json=excluded.payload_json
+                    """,
+                    (
+                        job_id,
+                        str(identity["provider"]),
+                        str(identity["provider_id"]),
+                        str(identity["provider_url"]),
+                        str(identity["evidence_url"]),
+                        float(identity.get("confidence", 0.0)),
+                        str(identity.get("verification", "syntax_and_source")),
+                        json.dumps(identity, ensure_ascii=False),
+                    ),
+                )
+
+    def list_verified_provider_ids(self, job_id: int) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id, provider, provider_id, provider_url, evidence_url, confidence, verification, payload_json, created_at FROM verified_provider_ids WHERE job_id = ? ORDER BY provider, provider_id",
+                (job_id,),
+            ).fetchall()
+        result = []
+        for row in rows:
+            payload = json.loads(row["payload_json"] or "{}")
+            payload.update({key: row[key] for key in ("id", "provider", "provider_id", "provider_url", "evidence_url", "confidence", "verification", "created_at")})
+            result.append(payload)
+        return result
 
     def save_subtitle_plan(self, source_file_id: int, plan: dict) -> None:
         with self.connect() as conn:

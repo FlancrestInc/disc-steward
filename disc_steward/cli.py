@@ -43,6 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("cleanup", parents=[shared], help="Execute configured cleanup; disabled and dry-run by default")
     previews = sub.add_parser("cleanup-previews", parents=[shared], help="Remove safely tracked previews for verified completed jobs")
     previews.add_argument("--job-id", type=int)
+    migrate = sub.add_parser("migrate", parents=[shared], help="Initialize or migrate the SQLite schema")
+    migrate.add_argument("--apply", action="store_true", help="Apply schema changes; without this flag only report what would happen")
     sub.add_parser("status", parents=[shared], help="Show pipeline status summary")
     automation = sub.add_parser("automation-worker", parents=[shared], help="Run the durable automation queue worker")
     automation.add_argument("--poll-interval", type=float, default=1.0, help="Seconds to sleep when the queue is empty")
@@ -82,6 +84,13 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging(getattr(args, "verbose", False))
     config = load_config(getattr(args, "config", "config.yaml"))
     db = Database(config.database_path)
+    if args.command == "migrate":
+        if not args.apply:
+            print(f"schema migration available for {config.database_path}; rerun with --apply to modify SQLite")
+            return 2
+        db.initialize()
+        print(f"schema migration applied: {config.database_path}")
+        return 0
     db.initialize()
     if args.command == "scan":
         job_ids = scan_completed_rips(db, config)

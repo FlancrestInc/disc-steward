@@ -48,6 +48,25 @@ class TitleDiscoveryConfig:
 
 
 @dataclass
+class AutomaticReviewConfig:
+    enabled: bool = True
+    bonus_ocr_enabled: bool = True
+    ocr_sample_count: int = 3
+    ocr_max_chars: int = 1600
+    hermes_enabled: bool = False
+    hermes_command: str = "hermes"
+    hermes_timeout_seconds: int = 300
+    hermes_batch_size: int = 5
+    research_enabled: bool = False
+    research_max_queries: int = 8
+    research_max_results_per_query: int = 5
+    research_max_sources: int = 10
+    research_max_fetched_chars: int = 20000
+    research_max_evidence_chars: int = 6000
+    research_timeout_seconds: float = 15.0
+
+
+@dataclass
 class NotificationConfig:
     enabled: bool = False
     provider: str = "ntfy"
@@ -214,6 +233,7 @@ class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     metadata: MetadataConfig = field(default_factory=MetadataConfig)
     title_discovery: TitleDiscoveryConfig = field(default_factory=TitleDiscoveryConfig)
+    automatic_review: AutomaticReviewConfig = field(default_factory=AutomaticReviewConfig)
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
     preview: PreviewConfig = field(default_factory=PreviewConfig)
     notifications: NotificationConfig = field(default_factory=NotificationConfig)
@@ -444,6 +464,7 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
     llm = data.get("llm", {})
     metadata = data.get("metadata", {})
     title_discovery = data.get("title_discovery", {})
+    automatic_review = data.get("automatic_review", {})
     processing = data.get("processing", {})
     preview = data.get("preview", {})
     notifications = data.get("notifications", {})
@@ -568,6 +589,23 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
             model=title_discovery.get("model", ""),
             min_confidence_to_auto_fill=float(title_discovery.get("min_confidence_to_auto_fill", 0.75)),
             max_candidates=int(title_discovery.get("max_candidates", 5)),
+        ),
+        automatic_review=AutomaticReviewConfig(
+            enabled=bool(automatic_review.get("enabled", True)),
+            bonus_ocr_enabled=bool(automatic_review.get("bonus_ocr_enabled", True)),
+            ocr_sample_count=int(automatic_review.get("ocr_sample_count", 3)),
+            ocr_max_chars=int(automatic_review.get("ocr_max_chars", 1600)),
+            hermes_enabled=bool(automatic_review.get("hermes_enabled", False)),
+            hermes_command=str(automatic_review.get("hermes_command", "hermes") or "hermes"),
+            hermes_timeout_seconds=int(automatic_review.get("hermes_timeout_seconds", 300)),
+            hermes_batch_size=int(automatic_review.get("hermes_batch_size", 5)),
+            research_enabled=bool(automatic_review.get("research_enabled", False)),
+            research_max_queries=int(automatic_review.get("research_max_queries", 8)),
+            research_max_results_per_query=int(automatic_review.get("research_max_results_per_query", 5)),
+            research_max_sources=int(automatic_review.get("research_max_sources", 10)),
+            research_max_fetched_chars=int(automatic_review.get("research_max_fetched_chars", 20000)),
+            research_max_evidence_chars=int(automatic_review.get("research_max_evidence_chars", 6000)),
+            research_timeout_seconds=float(automatic_review.get("research_timeout_seconds", 15.0)),
         ),
         processing=ProcessingConfig(
             method=str(processing.get("method", "local")),

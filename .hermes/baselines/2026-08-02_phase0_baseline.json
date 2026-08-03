@@ -1,0 +1,610 @@
+{
+  "database": "/var/lib/disc-steward/disc_steward.sqlite3",
+  "read_only": true,
+  "calibration": {
+    "55": {
+      "job_id": 55,
+      "status": "review_needed",
+      "file_count": 9,
+      "durations_seconds": [
+        4174.0,
+        29.0,
+        454.0,
+        107.7,
+        70.4,
+        148.3,
+        244.1,
+        3.2,
+        33.6
+      ],
+      "duration_range_seconds": [
+        3.2,
+        4174.0
+      ],
+      "subtitle_codecs": {
+        "dvd_subtitle": 6,
+        "subrip": 6
+      },
+      "subtitle_languages": {
+        "eng": 10,
+        "spa": 1,
+        "fre": 1
+      },
+      "audio_languages": {
+        "eng": 11,
+        "spa": 1,
+        "fre": 1
+      },
+      "chapter_counts": [
+        21,
+        0,
+        0,
+        0,
+        2,
+        2,
+        0,
+        0,
+        0
+      ],
+      "embedded_title_count": 0,
+      "makemkv_title_count": 0,
+      "job_review": {
+        "title": "CLONE_WARS-odCKiK",
+        "content_type": "unknown",
+        "library_root": "Movies",
+        "review_status": "review_needed",
+        "confidence": null,
+        "imdb_id": null,
+        "tmdb_id": null,
+        "tvdb_id": null,
+        "anidb_id": null,
+        "anilist_id": null,
+        "mal_id": null
+      },
+      "file_review_count": 9,
+      "roles": {
+        "main_feature": 1,
+        "menu_or_bumper": 3,
+        "interview": 2,
+        "promo": 2,
+        "featurette": 1
+      },
+      "extra_types": {
+        "none": 1,
+        "menu_or_bumper": 3,
+        "interview": 2,
+        "promo": 2,
+        "featurette": 1
+      },
+      "provider_ids": {},
+      "automatic_review_confidences": [
+        "Automatic bonus labeling (99%): Hermes: Animated Clone Wars battle footage is visible throughout the representative frame.",
+        "Automatic bonus labeling (40%): Hermes: Representative contact-sheet frame is entirely black with no visible text or imagery.",
+        "Automatic bonus labeling (88%): Hermes: Visible interview subject is George Lucas speaking directly to camera.",
+        "Automatic bonus labeling (22%): Hermes: Contact-sheet frame is black and contains no readable text; short promotional material is inferred only from the available evidence.",
+        "Automatic bonus labeling (84%): Hermes: Representative frame shows an abstract purple-and-gold animated transition with no feature or supplemental title card.",
+        "Automatic bonus labeling (65%): Hermes: Representative frame shows first-person video-game footage with a game HUD rather than the film.",
+        "Automatic bonus labeling (58%): Hermes: Visible interview subject appears to be a Clone Wars production interview participant; no readable title card is visible.",
+        "Automatic bonus labeling (35%): Hermes: The very short file has no supplied contact sheet or visible identifying title information.",
+        "Automatic bonus labeling (72%): Hermes: Representative frame shows animated clone troopers in a stylized action sequence."
+      ],
+      "audit_event_counts": {
+        "title_discovery": 1,
+        "scan": 1,
+        "preview_queued": 9,
+        "preview_batch_queued": 1,
+        "metadata_lookup": 1,
+        "preview_complete": 9,
+        "hermes_review_queued": 2,
+        "hermes_review_started": 2,
+        "hermes_media_review": 2,
+        "automatic_review_seed": 4,
+        "hermes_review_complete": 2,
+        "automatic_review_cleared": 1
+      },
+      "automation_job": null,
+      "provided_identity": "Star Wars The Clone Wars Disc 1"
+    },
+    "113": {
+      "job_id": 113,
+      "status": "review_needed",
+      "file_count": 1,
+      "durations_seconds": [
+        4553.7
+      ],
+      "duration_range_seconds": [
+        4553.7,
+        4553.7
+      ],
+      "subtitle_codecs": {},
+      "subtitle_languages": {},
+      "audio_languages": {
+        "eng": 1
+      },
+      "chapter_counts": [
+        6
+      ],
+      "embedded_title_count": 0,
+      "makemkv_title_count": 0,
+      "job_review": {
+        "title": "SCREAMING BULLS oKOaAb",
+        "content_type": "unknown",
+        "library_root": "Movies",
+        "review_status": "review_needed",
+        "confidence": 0.625,
+        "imdb_id": null,
+        "tmdb_id": null,
+        "tvdb_id": null,
+        "anidb_id": null,
+        "anilist_id": null,
+        "mal_id": null
+      },
+      "file_review_count": 1,
+      "roles": {
+        "main_feature": 1
+      },
+      "extra_types": {
+        "none": 1
+      },
+      "provider_ids": {},
+      "automatic_review_confidences": [
+        "Automatic bonus labeling (94%): Hermes: Visible title card reads “MossBack SCREAMING BULLS”; the file is a single feature-length program rather than supplemental material."
+      ],
+      "audit_event_counts": {
+        "hermes_review_queued": 1,
+        "title_discovery": 1,
+        "scan": 1,
+        "preview_queued": 1,
+        "preview_batch_queued": 1,
+        "hermes_review_started": 1,
+        "metadata_lookup": 1,
+        "hermes_media_review": 1,
+        "automatic_review_seed": 2,
+        "hermes_review_complete": 1,
+        "preview_complete": 1
+      },
+      "automation_job": null,
+      "provided_identity": "Mossback Screaming Bulls Deer Hunting Video"
+    },
+    "33": {
+      "job_id": 33,
+      "status": "review_needed",
+      "file_count": 9,
+      "durations_seconds": [
+        8532.1,
+        554.9,
+        551.2,
+        1420.0,
+        1423.0,
+        1422.0,
+        1423.0,
+        1422.0,
+        1422.0
+      ],
+      "duration_range_seconds": [
+        551.2,
+        8532.1
+      ],
+      "subtitle_codecs": {
+        "dvd_subtitle": 16
+      },
+      "subtitle_languages": {
+        "eng": 16
+      },
+      "audio_languages": {
+        "jpn": 7,
+        "eng": 9
+      },
+      "chapter_counts": [
+        30,
+        0,
+        0,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5
+      ],
+      "embedded_title_count": 9,
+      "makemkv_title_count": 0,
+      "job_review": {
+        "title": "MARVEL_ANIME_WOLVERINE_DISC_1-kGHIcj",
+        "content_type": "unknown",
+        "library_root": "Movies",
+        "review_status": "review_needed",
+        "confidence": null,
+        "imdb_id": null,
+        "tmdb_id": null,
+        "tvdb_id": null,
+        "anidb_id": null,
+        "anilist_id": null,
+        "mal_id": null
+      },
+      "file_review_count": 9,
+      "roles": {
+        "episode": 7,
+        "interview": 1,
+        "featurette": 1
+      },
+      "extra_types": {
+        "none": 7,
+        "interview": 1,
+        "featurette": 1
+      },
+      "provider_ids": {},
+      "automatic_review_confidences": [
+        "Automatic bonus labeling (42%): Hermes: Long-form anime content spanning approximately six episode lengths; representative frame shows Wolverine anime footage.",
+        "Automatic bonus labeling (97%): Hermes: Visible lower-third identifies Cort Lane as Vice-President, Development and Production, Marvel Television.",
+        "Automatic bonus labeling (52%): Hermes: Representative frame shows animated Wolverine action footage without an episode title card; short bonus duration and presentation indicate supplemental production material.",
+        "Automatic bonus labeling (70%): Hermes: Animated end-credit frame visibly includes the story credit for Wolverine; first episode is inferred from the disc sequence.",
+        "Automatic bonus labeling (34%): Hermes: Representative frame shows a bald swordsman in traditional Japanese clothing; no readable title card visible.",
+        "Automatic bonus labeling (30%): Hermes: Representative frame shows a dark-haired woman in an urban Japanese setting; no readable title card visible.",
+        "Automatic bonus labeling (30%): Hermes: Representative frame shows an injured bespectacled man in a suit; no readable title card visible.",
+        "Automatic bonus labeling (27%): Hermes: Representative frame shows Wolverine badly injured during a confrontation; no readable title card visible.",
+        "Automatic bonus labeling (58%): Hermes: Animated narrative footage shows Wolverine with another character; episode number is inferred from the disc sequence."
+      ],
+      "audit_event_counts": {
+        "title_discovery": 1,
+        "scan": 1,
+        "preview_queued": 9,
+        "preview_batch_queued": 1,
+        "metadata_lookup": 1,
+        "preview_complete": 9,
+        "hermes_review_queued": 2,
+        "hermes_review_started": 2,
+        "hermes_media_review": 2,
+        "automatic_review_seed": 4,
+        "hermes_review_complete": 2,
+        "automatic_review_cleared": 1
+      },
+      "automation_job": null,
+      "provided_identity": "Marvel Animated Series Wolverine Disc 1"
+    },
+    "38": {
+      "job_id": 38,
+      "status": "review_needed",
+      "file_count": 9,
+      "durations_seconds": [
+        1418.4,
+        1419.5,
+        1418.8,
+        1420.1,
+        1420.1,
+        1419.9,
+        26.5,
+        586.6,
+        313.3
+      ],
+      "duration_range_seconds": [
+        26.5,
+        1420.1
+      ],
+      "subtitle_codecs": {
+        "dvd_subtitle": 13
+      },
+      "subtitle_languages": {
+        "eng": 13
+      },
+      "audio_languages": {
+        "jpn": 7,
+        "eng": 7
+      },
+      "chapter_counts": [
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        2,
+        0,
+        0
+      ],
+      "embedded_title_count": 9,
+      "makemkv_title_count": 0,
+      "job_review": {
+        "title": "MARVEL_ANIME_IRONMAN_DISC1-npBlia",
+        "content_type": "unknown",
+        "library_root": "Movies",
+        "review_status": "review_needed",
+        "confidence": null,
+        "imdb_id": null,
+        "tmdb_id": null,
+        "tvdb_id": null,
+        "anidb_id": null,
+        "anilist_id": null,
+        "mal_id": null
+      },
+      "file_review_count": 9,
+      "roles": {
+        "episode": 6,
+        "menu_or_bumper": 1,
+        "interview": 2
+      },
+      "extra_types": {
+        "none": 6,
+        "menu_or_bumper": 1,
+        "interview": 2
+      },
+      "provider_ids": {},
+      "automatic_review_confidences": [
+        "Automatic bonus labeling (35%): Hermes: Animated episode footage visibly shows Tony Stark seated beside a woman in a nighttime vehicle; no episode title card is visible.",
+        "Automatic bonus labeling (38%): Hermes: Visible anime frame shows a stern suited corporate figure in an office; no title card is visible.",
+        "Automatic bonus labeling (35%): Hermes: Visible anime frame shows Tony Stark alongside a woman connected to the Japan storyline; no title card is visible.",
+        "Automatic bonus labeling (57%): Hermes: Visible anime scenes show Tony Stark with the masked woman associated with the episode's central mystery.",
+        "Automatic bonus labeling (42%): Hermes: Visible anime frame centers on a pink-haired woman in what appears to be an interview or discussion scene; no title card is visible.",
+        "Automatic bonus labeling (40%): Hermes: Visible anime frame shows Tony Stark standing before a large display; no title card is visible.",
+        "Automatic bonus labeling (100%): Hermes: Visible anti-piracy warning card from the Intellectual Property Rights Coordination Center states: Piracy is not a victimless crime.",
+        "Automatic bonus labeling (99%): Hermes: Visible lower-third identifies Warren Ellis and labels the segment Story.",
+        "Automatic bonus labeling (86%): Hermes: Visible footage shows an interview subject in front of Marvel Anime Iron Man and Animax promotional backdrops."
+      ],
+      "audit_event_counts": {
+        "title_discovery": 1,
+        "scan": 1,
+        "preview_queued": 9,
+        "preview_batch_queued": 1,
+        "metadata_lookup": 1,
+        "preview_complete": 9,
+        "hermes_review_queued": 2,
+        "hermes_review_started": 2,
+        "hermes_media_review": 2,
+        "automatic_review_seed": 4,
+        "hermes_review_complete": 2,
+        "automatic_review_cleared": 1
+      },
+      "automation_job": null,
+      "provided_identity": "Marvel Animated Series Iron Man Disc 1"
+    },
+    "111": {
+      "job_id": 111,
+      "status": "review_needed",
+      "file_count": 3,
+      "durations_seconds": [
+        6695.6,
+        115.8,
+        327.0
+      ],
+      "duration_range_seconds": [
+        115.8,
+        6695.6
+      ],
+      "subtitle_codecs": {
+        "dvd_subtitle": 4,
+        "subrip": 2
+      },
+      "subtitle_languages": {
+        "eng": 4,
+        "fre": 2
+      },
+      "audio_languages": {
+        "eng": 4,
+        "fre": 1
+      },
+      "chapter_counts": [
+        20,
+        0,
+        0
+      ],
+      "embedded_title_count": 0,
+      "makemkv_title_count": 0,
+      "job_review": {
+        "title": "CROCODILE2 mlcgKl",
+        "content_type": "unknown",
+        "library_root": "Movies",
+        "review_status": "review_needed",
+        "confidence": 0.625,
+        "imdb_id": null,
+        "tmdb_id": null,
+        "tvdb_id": null,
+        "anidb_id": null,
+        "anilist_id": null,
+        "mal_id": null
+      },
+      "file_review_count": 3,
+      "roles": {
+        "main_feature": 1,
+        "trailer": 1,
+        "featurette": 1
+      },
+      "extra_types": {
+        "none": 1,
+        "trailer": 1,
+        "behind_the_scenes": 1
+      },
+      "provider_ids": {},
+      "automatic_review_confidences": [
+        "Automatic bonus labeling (88%): Hermes: Feature-length 111-minute title with narrative scenes showing characters and vehicles in a rural setting; consistent with the Crocodile 2 feature.",
+        "Automatic bonus labeling (65%): Hermes: Short 116-second promotional-length video showing a stylized character silhouette at sunset, consistent with a film trailer.",
+        "Automatic bonus labeling (42%): Hermes: Short 5-minute supplemental-length video; visible close-up of production or audio equipment rather than a standalone narrative feature."
+      ],
+      "audit_event_counts": {
+        "hermes_review_queued": 1,
+        "title_discovery": 1,
+        "scan": 1,
+        "preview_queued": 3,
+        "preview_batch_queued": 1,
+        "metadata_lookup": 1,
+        "preview_complete": 3,
+        "hermes_review_started": 1,
+        "hermes_media_review": 1,
+        "automatic_review_seed": 2,
+        "hermes_review_complete": 1
+      },
+      "automation_job": null,
+      "provided_identity": "Crocodile Dundee 2"
+    }
+  },
+  "blind_holdout": {
+    "112": {
+      "job_id": 112,
+      "status": "review_needed",
+      "file_count": 6,
+      "durations_seconds": [
+        23.0,
+        218.4,
+        193.5,
+        654.9,
+        157.1,
+        4897.9
+      ],
+      "duration_range_seconds": [
+        23.0,
+        4897.9
+      ],
+      "subtitle_codecs": {
+        "dvd_subtitle": 14
+      },
+      "subtitle_languages": {
+        "eng": 4,
+        "spa": 5,
+        "fre": 5
+      },
+      "audio_languages": {
+        "eng": 6,
+        "spa": 1,
+        "fre": 1
+      },
+      "chapter_counts": [
+        0,
+        0,
+        0,
+        9,
+        5,
+        20
+      ],
+      "embedded_title_count": 0,
+      "makemkv_title_count": 0,
+      "file_review_count": 6,
+      "roles": {
+        "menu_or_bumper": 1,
+        "trailer": 2,
+        "featurette": 2,
+        "main_feature": 1
+      },
+      "extra_types": {
+        "none": 2,
+        "trailer": 2,
+        "animation_test": 1,
+        "behind_the_scenes": 1
+      },
+      "provider_ids": {},
+      "automatic_review_confidences": [
+        "Automatic bonus labeling (30%): Hermes: Contact sheet shows a brief abstract orange arc animation on a black background with no visible title or credits.",
+        "Automatic bonus labeling (78%): Hermes: Animated girl visibly holds a blue balloon animal in a suburban park, consistent with the Despicable Me promotional trailer.",
+        "Automatic bonus labeling (76%): Hermes: Visible LEGO computer-animation test footage featuring a minifigure woman and a white-suited LEGO character.",
+        "Automatic bonus labeling (99%): Hermes: Visible title card reads “Space Police Log.”",
+        "Automatic bonus labeling (62%): Hermes: Visible promotional-style LEGO space imagery with a spacecraft held against a blue planetary background.",
+        "Automatic bonus labeling (94%): Hermes: Full-length LEGO computer-animated feature imagery with Clutch Powers visible."
+      ],
+      "audit_event_counts": {
+        "hermes_review_queued": 1,
+        "title_discovery": 1,
+        "scan": 1,
+        "preview_queued": 6,
+        "preview_batch_queued": 1,
+        "metadata_lookup": 1,
+        "preview_complete": 6,
+        "hermes_review_started": 1,
+        "hermes_media_review": 1,
+        "automatic_review_seed": 2,
+        "hermes_review_complete": 1
+      },
+      "automation_job": null
+    },
+    "35": {
+      "job_id": 35,
+      "status": "review_needed",
+      "file_count": 12,
+      "durations_seconds": [
+        1416.2,
+        1418.2,
+        1416.5,
+        1417.2,
+        1418.5,
+        1419.3,
+        26.5,
+        33.0,
+        311.7,
+        69.3,
+        115.1,
+        1924.4
+      ],
+      "duration_range_seconds": [
+        26.5,
+        1924.4
+      ],
+      "subtitle_codecs": {
+        "dvd_subtitle": 13
+      },
+      "subtitle_languages": {
+        "eng": 13
+      },
+      "audio_languages": {
+        "jpn": 8,
+        "eng": 9
+      },
+      "chapter_counts": [
+        7,
+        5,
+        5,
+        5,
+        5,
+        5,
+        2,
+        0,
+        3,
+        0,
+        0,
+        0
+      ],
+      "embedded_title_count": 12,
+      "makemkv_title_count": 0,
+      "file_review_count": 12,
+      "roles": {
+        "episode": 6,
+        "menu_or_bumper": 1,
+        "promo": 1,
+        "trailer": 3,
+        "interview": 1
+      },
+      "extra_types": {
+        "none": 6,
+        "menu_or_bumper": 1,
+        "promo": 1,
+        "trailer": 3,
+        "interview": 1
+      },
+      "provider_ids": {},
+      "automatic_review_confidences": [
+        "Automatic bonus labeling (68%): Hermes: Animated X-Men episode footage; the similarly sized long-form program is part of the main episode group.",
+        "Automatic bonus labeling (42%): Hermes: Animated X-Men episode footage is visible; episode identity is inferred from the sequential Disc 2 episode grouping.",
+        "Automatic bonus labeling (72%): Hermes: Animated X-Men episode footage with the disc-order position indicating episode 9.",
+        "Automatic bonus labeling (42%): Hermes: Animated X-Men episode footage with a prominent red-haired woman is visible; episode identity is inferred from the sequential Disc 2 episode grouping.",
+        "Automatic bonus labeling (42%): Hermes: Animated X-Men episode footage in a futuristic setting is visible; episode identity is inferred from the sequential Disc 2 episode grouping.",
+        "Automatic bonus labeling (42%): Hermes: Animated X-Men episode footage is visible; episode identity is inferred from the sequential six-episode Disc 2 grouping.",
+        "Automatic bonus labeling (99%): Hermes: Visible text reads “Piracy is not a victimless crime” and directs viewers to iprcenter.gov.",
+        "Automatic bonus labeling (96%): Hermes: Visible title card reads “ATTACK OF THE SHOW!” with television-show imagery.",
+        "Automatic bonus labeling (38%): Hermes: Visible live-action footage of a man walking across a baseball field; not animated series footage.",
+        "Automatic bonus labeling (90%): Hermes: Visible review quote explicitly references Mamoru Oshii and Ghost in the Shell, identifying a trailer for The Sky Crawlers.",
+        "Automatic bonus labeling (35%): Hermes: Short animated promotional footage with dark fantasy imagery and no readable title card.",
+        "Automatic bonus labeling (84%): Hermes: Representative frames visibly show a live-action interview with two speakers."
+      ],
+      "audit_event_counts": {
+        "title_discovery": 1,
+        "scan": 1,
+        "preview_queued": 12,
+        "preview_batch_queued": 1,
+        "metadata_lookup": 1,
+        "preview_complete": 12,
+        "hermes_review_queued": 2,
+        "hermes_review_started": 2,
+        "hermes_media_review": 2,
+        "automatic_review_seed": 4,
+        "hermes_review_complete": 2,
+        "automatic_review_cleared": 1
+      },
+      "automation_job": null
+    }
+  }
+}

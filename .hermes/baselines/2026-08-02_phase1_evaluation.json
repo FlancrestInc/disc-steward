@@ -1,0 +1,53 @@
+{
+  "read_only": true,
+  "calibration": {
+    "55": {
+      "job_id": 55,
+      "labeled": true,
+      "total_files": 9,
+      "expected_assignments": 8,
+      "predicted_assignments": 8,
+      "correct_assignments": 9,
+      "accuracy": 1.0,
+      "unmatched_files": 1,
+      "duplicate_candidate_assignments": 0,
+      "aggregate_assignments": 0,
+      "warnings": []
+    },
+    "33": {
+      "job_id": 33,
+      "labeled": true,
+      "total_files": 9,
+      "expected_assignments": 8,
+      "predicted_assignments": 8,
+      "correct_assignments": 9,
+      "accuracy": 1.0,
+      "unmatched_files": 0,
+      "duplicate_candidate_assignments": 0,
+      "aggregate_assignments": 1,
+      "warnings": []
+    },
+    "38": {
+      "job_id": 38,
+      "labeled": true,
+      "total_files": 9,
+      "expected_assignments": 9,
+      "predicted_assignments": 9,
+      "correct_assignments": 9,
+      "accuracy": 1.0,
+      "unmatched_files": 0,
+      "duplicate_candidate_assignments": 0,
+      "aggregate_assignments": 0,
+      "warnings": []
+    }
+  },
+  "blind": {
+    "jobs": [
+      "112",
+      "35"
+    ],
+    "labels_withheld": true,
+    "status": "predictions_not_evaluated",
+    "reason": "No blind ground truth or prediction report was loaded."
+  }
+}

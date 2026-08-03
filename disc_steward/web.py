@@ -26,6 +26,7 @@ from .models import AudioStream, Classification, FileReviewDecision, GeneratedPa
 from .review import ReviewValidationError, classification_from_json, suggest_subtitle_policy, validate_review_ready
 from .status import build_status_summary, format_status_summary
 from .scanner import scan_completed_rips, scan_disc_folder, watch_completed_rips
+from .job_review_automation import run_automatic_review, scanned_files_for_job
 from .subtitle_planner import generate_subtitle_plan
 from .transfer import transfer_job_to_eddy
 from .validation import validate_job_outputs
@@ -623,6 +624,18 @@ def handle_job_action(db: Database, config: AppConfig, job_id: int, action: str,
     if action == "llm-suggestions":
         result = request_suggestions(db, config, job_id)
         return f"llm-suggestions:{len(result.get('suggestions', []))}"
+    if action == "automatic-review":
+        job = db.get_job(job_id)
+        if job is None:
+            raise ValueError(f"Unknown job {job_id}")
+        if job.status in {"transferring_to_eddy", "imported_to_jellyfin"}:
+            raise ValueError("Cannot rerun automatic review after transfer has started")
+        current = db.get_hermes_review_job(job_id)
+        if current and current["state"] in {"queued", "running"}:
+            return f"automatic-review-already-{current['state']}"
+        db.enqueue_hermes_review_job(job_id)
+        db.audit("hermes_review_queued", "Queued Hermes review for all files", job_id)
+        return "automatic-review-queued"
     if action == "generate-subtitle-plans":
         decisions = {decision.source_file_id: decision for decision in db.list_file_reviews(job_id)}
         count = 0
@@ -1162,8 +1175,13 @@ def render_job_review(
         <form id="job-review-form" method="post" action="/jobs/{job_id}/save" oninput="window.updateDestinationPreviews && window.updateDestinationPreviews()" onchange="window.updateDestinationPreviews && window.updateDestinationPreviews()">
           {render_job_fields(config, display_review)}
           {render_metadata_lookup_strip(db, config, job_id, display_review.title)}
+          {render_research_panel(db, job_id)}
+          {render_verified_provider_panel(db, job_id)}
+          {render_release_ranking_panel(db, job_id)}
           {groups_html}
         </form>
+        {render_phase3_sections(db, config, job_id)}
+        {render_phase4_sections(db, config, job_id)}
         """,
     )
 
@@ -1272,6 +1290,86 @@ def render_job_fields(config: AppConfig, review: JobReviewMetadata) -> str:
         </div>
       </details>
     </section>
+    """
+
+
+def render_research_panel(db: Database, job_id: int) -> str:
+    packet = db.get_research_packet(job_id)
+    if not packet:
+        return ""
+    status = escape(str(packet.get("status") or "unknown"))
+    queries = packet.get("queries") or []
+    sources = packet.get("sources") or []
+    warnings = list(packet.get("warnings") or []) + list(packet.get("conflicts") or [])
+    source_cards = []
+    for source in sources:
+        url = str(source.get("url") or "")
+        title = escape(str(source.get("title") or url or "Untitled source"))
+        snippet = escape(str(source.get("snippet") or ""))
+        source_status = escape(str(source.get("status") or "unknown"))
+        href = escape(url, quote=True)
+        link = f'<a href="{href}" target="_blank" rel="noreferrer noopener">{title}</a>' if url else title
+        source_cards.append(f'<li><strong>{link}</strong> <span class="muted">{source_status}</span><br><span class="muted">{snippet}</span></li>')
+    source_html = "".join(source_cards) or '<li class="muted">No sources returned.</li>'
+    warnings_html = "".join(f'<p class="errors">{escape(str(warning))}</p>' for warning in warnings)
+    return f"""
+    <details class="lookup-strip advanced-card ds-motion-disclosure">
+      <summary><strong>Disc research provenance</strong> <span class="muted">status: {status} · {len(queries)} queries · {len(sources)} sources</span></summary>
+      <p class="wide muted">External research is advisory and may describe a different edition or region. Actual media evidence and operator corrections remain authoritative.</p>
+      {warnings_html}
+      <ul class="wide research-source-list">{source_html}</ul>
+    </details>
+    """
+
+
+def render_verified_provider_panel(db: Database, job_id: int) -> str:
+    identities = db.list_verified_provider_ids(job_id)
+    if not identities:
+        return ""
+    cards = []
+    for identity in identities:
+        provider = escape(str(identity.get("provider") or "provider"))
+        provider_id = escape(str(identity.get("provider_id") or ""))
+        provider_url = str(identity.get("provider_url") or "")
+        evidence_url = str(identity.get("evidence_url") or "")
+        provider_link = f'<a href="{escape(provider_url, quote=True)}" target="_blank" rel="noreferrer noopener">Provider source</a>' if provider_url else "No provider source"
+        evidence_link = f'<a href="{escape(evidence_url, quote=True)}" target="_blank" rel="noreferrer noopener">Evidence source</a>' if evidence_url and evidence_url != provider_url else ""
+        confidence = identity.get("confidence")
+        confidence_text = f" · confidence {float(confidence):.2f}" if isinstance(confidence, (int, float)) else ""
+        cards.append(f"<li><strong>{provider}: {provider_id}</strong>{confidence_text} · {escape(str(identity.get('verification') or 'verified'))} · {provider_link} {evidence_link}</li>")
+    return f"""
+    <details class="lookup-strip advanced-card ds-motion-disclosure">
+      <summary><strong>Verified provider identities</strong> <span class="muted">{len(identities)} identity record(s)</span></summary>
+      <p class="wide muted">These IDs passed syntax and provider-source checks. They are provenance records, not automatic approval of the release or final review metadata.</p>
+      <ul class="wide research-source-list">{"".join(cards)}</ul>
+    </details>
+    """
+
+
+def render_release_ranking_panel(db: Database, job_id: int) -> str:
+    ranking = db.get_release_ranking(job_id)
+    if not ranking:
+        return ""
+    matches = ranking.get("matches") or []
+    cards = []
+    for match in matches:
+        title = escape(str(match.get("title") or match.get("release_key") or "Unknown release"))
+        key = escape(str(match.get("release_key") or ""))
+        score = match.get("score")
+        score_text = f"{float(score):.3f}" if isinstance(score, (int, float)) else "n/a"
+        confidence = escape(str(match.get("confidence") or "unknown"))
+        warnings = match.get("warnings") or []
+        warning_html = "".join(f"<span class='errors'>{escape(str(warning))}</span>" for warning in warnings)
+        cards.append(f"<li><strong>{title}</strong> <span class='muted'>({key}) · score {score_text} · {confidence}</span>{warning_html}</li>")
+    warnings = ranking.get("warnings") or []
+    warnings_html = "".join(f"<p class='errors'>{escape(str(warning))}</p>" for warning in warnings)
+    return f"""
+    <details class="lookup-strip advanced-card ds-motion-disclosure">
+      <summary><strong>Release-fit ranking</strong> <span class="muted">{len(matches)} cited candidate(s)</span></summary>
+      <p class="wide muted">This is a structural hypothesis based on scanned file vectors and cited inventories. It does not override visible media evidence or operator decisions.</p>
+      {warnings_html}
+      <ol class="wide research-source-list">{"".join(cards) or '<li class="muted">No release candidates returned.</li>'}</ol>
+    </details>
     """
 
 
@@ -1666,8 +1764,9 @@ def run_automation_worker(
         except BlockingIOError:
             return
         db.reset_stuck_automation_jobs()
+        db.reset_stuck_hermes_review_jobs()
         while True:
-            processed = _process_next_automation_job(db, config)
+            processed = _process_next_background_job(db, config)
             if stop_event is not None and stop_event.is_set():
                 return
             if processed:
@@ -1675,6 +1774,34 @@ def run_automation_worker(
             if stop_event is not None and stop_event.wait(timeout=poll_interval):
                 return
             time.sleep(poll_interval)
+
+
+def _process_next_background_job(db: Database, config: AppConfig) -> bool:
+    if _process_next_hermes_review_job(db, config):
+        return True
+    return _process_next_automation_job(db, config)
+
+
+def _process_next_hermes_review_job(db: Database, config: AppConfig) -> bool:
+    queued = db.claim_next_hermes_review_job()
+    if queued is None:
+        return False
+    job_id = int(queued["job_id"])
+    db.audit("hermes_review_started", "Started background Hermes review", job_id, {"attempts": queued["attempts"] + 1})
+    try:
+        job = db.get_job(job_id)
+        if job is None:
+            raise ValueError(f"Unknown job {job_id}")
+        scanned_files, classifications, source_ids = scanned_files_for_job(db, job_id)
+        labels = run_automatic_review(db, config, job_id, scanned_files, classifications, source_ids, job.disc_title)
+        result = f"labeled {len(labels)} file(s)"
+        db.finish_hermes_review_job(job_id, state="succeeded", result=result)
+        db.audit("hermes_review_complete", f"Background Hermes review finished: {result}", job_id)
+    except Exception as error:  # pragma: no cover - defensive logging for background work
+        message = str(error)
+        db.finish_hermes_review_job(job_id, state="failed", error=message)
+        db.audit("hermes_review_failed", f"Background Hermes review failed: {message}", job_id, {"error": message})
+    return True
 
 
 def _process_next_automation_job(db: Database, config: AppConfig) -> bool:
@@ -1796,6 +1923,13 @@ def render_phase4_sections(db: Database, config: AppConfig, job_id: int) -> str:
         for item in suggestions
     )
     cleanup_hold = db.has_cleanup_hold(job_id)
+    hermes_job = db.get_hermes_review_job(job_id)
+    hermes_active = hermes_job and hermes_job["state"] in {"queued", "running"}
+    hermes_status = ""
+    if hermes_job:
+        detail = hermes_job.get("last_error") or hermes_job.get("last_result") or ""
+        hermes_status = f"<p>Hermes review status: <strong>{escape(hermes_job['state'])}</strong>{f' · {escape(detail)}' if detail else ''}</p>"
+    hermes_button = "Hermes review queued" if hermes_active else "Run Hermes review on all files"
     cleanup_rows = "".join(
         f"<tr><td>{escape(item['item_type'])}</td><td>{'yes' if item['eligible'] else 'no'}</td><td><code>{escape(item['path'])}</code></td><td>{escape(item['reason'])}</td></tr>"
         for item in db.list_cleanup_eligibility(job_id)
@@ -1804,7 +1938,9 @@ def render_phase4_sections(db: Database, config: AppConfig, job_id: int) -> str:
     <details class="advanced-panel ds-motion-disclosure">
       <summary>Metadata automation and cleanup</summary>
       <section class="ops ds-panel">
-        <p>Metadata providers: <strong>{'enabled' if config.metadata.enabled else 'disabled'}</strong> · LLM/Hermes: <strong>{'enabled' if config.llm.enabled else 'disabled'}</strong> · Cleanup: <strong>{'enabled' if config.cleanup.enabled else 'disabled'}</strong> ({'dry-run' if config.cleanup.dry_run else 'live'})</p>
+        <p>Metadata providers: <strong>{'enabled' if config.metadata.enabled else 'disabled'}</strong> · LLM/Hermes: <strong>{'enabled' if config.automatic_review.hermes_enabled else 'disabled'}</strong> · Cleanup: <strong>{'enabled' if config.cleanup.enabled else 'disabled'}</strong> ({'dry-run' if config.cleanup.dry_run else 'live'})</p>
+        {hermes_status}
+        <form method="post" action="/jobs/{job_id}/automatic-review" class="inline-form"><button class="ds-button" {'disabled' if (not config.automatic_review.hermes_enabled or hermes_active) else ''}>{hermes_button}</button></form>
         <form method="post" action="/jobs/{job_id}/llm-suggestions" class="inline-form">
           <button class="ds-button" {'disabled' if not config.llm.enabled else ''}>Request LLM suggestions</button>
         </form>

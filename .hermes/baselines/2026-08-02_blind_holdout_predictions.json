@@ -1,0 +1,197 @@
+{
+  "artifact_type": "blind_holdout_predictions",
+  "ground_truth_included": false,
+  "identities_included": false,
+  "jobs": [
+    {
+      "job_id": 112,
+      "prediction_count": 6,
+      "predictions": [
+        {
+          "source_file_id": 963,
+          "role_prediction": "short_supplement_or_menu_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 23.023
+        },
+        {
+          "source_file_id": 964,
+          "role_prediction": "extra_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 218.384
+        },
+        {
+          "source_file_id": 965,
+          "role_prediction": "extra_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 193.493
+        },
+        {
+          "source_file_id": 966,
+          "role_prediction": "extra_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 654.854
+        },
+        {
+          "source_file_id": 967,
+          "role_prediction": "short_supplement_or_menu_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 157.056
+        },
+        {
+          "source_file_id": 968,
+          "role_prediction": "main_feature_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 4897.859
+        }
+      ],
+      "blind_safety": {
+        "job_id": 112,
+        "labeled": false,
+        "total_files": 6,
+        "expected_assignments": 0,
+        "predicted_assignments": 0,
+        "correct_assignments": 0,
+        "accuracy": null,
+        "unmatched_files": 6,
+        "duplicate_candidate_assignments": 0,
+        "aggregate_assignments": 0,
+        "warnings": [
+          "ground truth withheld",
+          "identity withheld",
+          "duration-structure-only predictions"
+        ]
+      }
+    },
+    {
+      "job_id": 35,
+      "prediction_count": 12,
+      "predictions": [
+        {
+          "source_file_id": 399,
+          "role_prediction": "episode_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 1416.181
+        },
+        {
+          "source_file_id": 400,
+          "role_prediction": "episode_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 1418.15
+        },
+        {
+          "source_file_id": 401,
+          "role_prediction": "episode_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 1416.515
+        },
+        {
+          "source_file_id": 402,
+          "role_prediction": "episode_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 1417.249
+        },
+        {
+          "source_file_id": 403,
+          "role_prediction": "episode_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 1418.45
+        },
+        {
+          "source_file_id": 404,
+          "role_prediction": "episode_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 1419.284
+        },
+        {
+          "source_file_id": 405,
+          "role_prediction": "short_supplement_or_menu_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 26.459
+        },
+        {
+          "source_file_id": 406,
+          "role_prediction": "short_supplement_or_menu_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 33.033
+        },
+        {
+          "source_file_id": 407,
+          "role_prediction": "extra_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 311.744
+        },
+        {
+          "source_file_id": 408,
+          "role_prediction": "short_supplement_or_menu_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 69.302
+        },
+        {
+          "source_file_id": 409,
+          "role_prediction": "short_supplement_or_menu_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 115.115
+        },
+        {
+          "source_file_id": 410,
+          "role_prediction": "main_feature_candidate",
+          "candidate_id": null,
+          "relation": "unmatched_file",
+          "score": 0.0,
+          "duration_seconds": 1924.355
+        }
+      ],
+      "blind_safety": {
+        "job_id": 35,
+        "labeled": false,
+        "total_files": 12,
+        "expected_assignments": 0,
+        "predicted_assignments": 0,
+        "correct_assignments": 0,
+        "accuracy": null,
+        "unmatched_files": 12,
+        "duplicate_candidate_assignments": 0,
+        "aggregate_assignments": 0,
+        "warnings": [
+          "ground truth withheld",
+          "identity withheld",
+          "duration-structure-only predictions"
+        ]
+      }
+    }
+  ]
+}
