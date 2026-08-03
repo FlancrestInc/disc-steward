@@ -173,9 +173,10 @@ automatic_review:
   hermes_command: hermes
   hermes_timeout_seconds: 300
   hermes_batch_size: 5
-  # Research is opt-in until a concrete search backend is configured.
   research_enabled: false
+  research_provider: none
   research_max_queries: 8
+  # The built-in Wikipedia provider uses its public API and bounded page fetches.
   research_max_results_per_query: 5
   research_max_sources: 10
   research_max_fetched_chars: 20000

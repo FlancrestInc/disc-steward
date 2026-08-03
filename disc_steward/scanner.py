@@ -189,6 +189,8 @@ def scan_disc_folder(
     review.title_discovery_json = asdict(discovery)
     _apply_title_discovery_defaults(review, discovery, disc_folder.name)
     db.save_job_review(review)
+    job = db.get_job(job_id)
+    research_title = (job.disc_title if job and job.disc_title and job.disc_title != disc_folder.name else None) or review.title or disc_folder.name
     if config.automatic_review.hermes_enabled and hermes_review is None:
         db.enqueue_hermes_review_job(job_id)
         db.audit("hermes_review_queued", "Queued Hermes review for all files after scan", job_id)
@@ -200,7 +202,7 @@ def scan_disc_folder(
             scanned_files,
             classifications,
             source_ids,
-            disc_folder.name,
+            research_title,
             text_extractor=bonus_text_extractor,
             hermes_review=hermes_review,
         )

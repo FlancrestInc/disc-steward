@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import html
+import json
 import re
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
-from urllib.parse import urldefrag, urlparse
+from urllib.parse import parse_qs, quote, urldefrag, urlparse
 from urllib.request import Request, urlopen
 
 _RE_EPISODE = re.compile(
@@ -112,7 +114,7 @@ def build_research_queries(
         title = normalize_text(folder_name or "", 180)
     if not title:
         return []
-    suffixes = [("DVD contents", "release contents"), ("DVD episodes", "episode listing"), ("DVD extras", "extras inventory")]
+    suffixes = [("", "exact title identity"), ("DVD contents", "release contents"), ("DVD episodes", "episode listing"), ("DVD extras", "extras inventory")]
     if disc_hint:
         suffixes.append((f"{disc_hint} episodes", "disc-specific episode listing"))
         suffixes.append((f"{disc_hint} extras", "disc-specific extras listing"))
@@ -136,6 +138,76 @@ def build_research_queries(
 
 SearchFn = Callable[[str], Iterable[dict[str, Any]]]
 FetchFn = Callable[[str], dict[str, Any] | str]
+
+
+def duckduckgo_search(query: str, *, timeout_seconds: float = 15.0, max_results: int = 5) -> list[dict[str, str]]:
+    """Fetch public DuckDuckGo HTML results without credentials or cookies."""
+    endpoint = f"https://html.duckduckgo.com/html/?q={quote(query)}"
+    request = Request(endpoint, headers={"User-Agent": "disc-steward-research/1.0"})
+    with urlopen(request, timeout=timeout_seconds) as response:
+        body = response.read(500_000).decode("utf-8", errors="replace")
+    results: list[dict[str, str]] = []
+    for match in re.finditer(
+        r'<a[^>]+class="result__a"[^>]+href="(?P<href>[^"]+)"[^>]*>(?P<title>.*?)</a>',
+        body,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        href = html.unescape(match.group("href"))
+        parsed = urlparse(href)
+        redirected = parse_qs(parsed.query).get("uddg", [""])[0]
+        url = redirected or href
+        if not url.startswith(("http://", "https://")):
+            continue
+        title = re.sub(r"<[^>]+>", " ", html.unescape(match.group("title")))
+        results.append({"url": url, "title": normalize_text(title, 300), "source_kind": "duckduckgo"})
+        if len(results) >= max_results:
+            break
+    return results
+
+
+def wikipedia_search(query: str, *, timeout_seconds: float = 15.0, max_results: int = 5) -> list[dict[str, str]]:
+    endpoint = "https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&utf8=1&srnamespace=0&srlimit=" + str(max_results) + "&srsearch=" + quote(query)
+    request = Request(endpoint, headers={"User-Agent": "disc-steward-research/1.0 (bounded metadata lookup)"})
+    with urlopen(request, timeout=timeout_seconds) as response:
+        payload = json.loads(response.read(500_000).decode("utf-8", errors="replace"))
+    results = []
+    for item in payload.get("query", {}).get("search", [])[:max_results]:
+        title = str(item.get("title", "")).strip()
+        if not title:
+            continue
+        results.append({
+            "url": "https://en.wikipedia.org/wiki/" + quote(title.replace(" ", "_")),
+            "title": title,
+            "snippet": re.sub(r"<[^>]+>", " ", html.unescape(str(item.get("snippet", "")))),
+            "source_kind": "wikipedia",
+        })
+    return results
+
+
+def configured_research_adapter(config: Any) -> BoundedResearchAdapter:
+    """Construct the explicitly configured production research adapter."""
+    provider = str(getattr(config.automatic_review, "research_provider", "none") or "none").strip().lower()
+    limits = ResearchLimits(
+        max_queries=config.automatic_review.research_max_queries,
+        max_results_per_query=config.automatic_review.research_max_results_per_query,
+        max_sources=config.automatic_review.research_max_sources,
+        max_fetched_chars=config.automatic_review.research_max_fetched_chars,
+        max_evidence_chars=config.automatic_review.research_max_evidence_chars,
+        timeout_seconds=config.automatic_review.research_timeout_seconds,
+    )
+    if provider == "duckduckgo":
+        return BoundedResearchAdapter(
+            search=lambda query: duckduckgo_search(query, timeout_seconds=limits.timeout_seconds, max_results=limits.max_results_per_query),
+            fetch=lambda url: fetch_url(url, timeout_seconds=limits.timeout_seconds),
+            limits=limits,
+        )
+    if provider == "wikipedia":
+        return BoundedResearchAdapter(
+            search=lambda query: wikipedia_search(query, timeout_seconds=limits.timeout_seconds, max_results=limits.max_results_per_query),
+            fetch=lambda url: fetch_url(url, timeout_seconds=limits.timeout_seconds),
+            limits=limits,
+        )
+    return BoundedResearchAdapter(limits=limits)
 
 
 @dataclass(frozen=True)

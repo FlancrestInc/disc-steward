@@ -58,6 +58,7 @@ class AutomaticReviewConfig:
     hermes_timeout_seconds: int = 300
     hermes_batch_size: int = 5
     research_enabled: bool = False
+    research_provider: str = "none"
     research_max_queries: int = 8
     research_max_results_per_query: int = 5
     research_max_sources: int = 10
@@ -600,6 +601,7 @@ def config_from_dict(data: dict[str, Any]) -> AppConfig:
             hermes_timeout_seconds=int(automatic_review.get("hermes_timeout_seconds", 300)),
             hermes_batch_size=int(automatic_review.get("hermes_batch_size", 5)),
             research_enabled=bool(automatic_review.get("research_enabled", False)),
+            research_provider=str(automatic_review.get("research_provider", "none")),
             research_max_queries=int(automatic_review.get("research_max_queries", 8)),
             research_max_results_per_query=int(automatic_review.get("research_max_results_per_query", 5)),
             research_max_sources=int(automatic_review.get("research_max_sources", 10)),

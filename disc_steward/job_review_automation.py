@@ -7,7 +7,7 @@ from .automatic_review import AutomaticLabel, build_automatic_bonus_labels
 from .classifier import classify_disc_files
 from .hermes_bonus_review import request_hermes_bonus_review
 from .media_evidence import MediaEvidence, build_media_evidence, detect_aggregate_relations
-from .disc_research import BoundedResearchAdapter, DiscResearchPacket, ResearchLimits, build_research_queries, facts_to_content_candidates
+from .disc_research import BoundedResearchAdapter, DiscResearchPacket, ResearchLimits, build_research_queries, configured_research_adapter, facts_to_content_candidates
 from .models import AudioStream, Classification, ScannedFile, SubtitleStream, VideoInfo
 from .release_inventory import inventory_from_research_facts
 from .release_matching import rank_release_inventories
@@ -49,16 +49,7 @@ def run_automatic_review(
             content_type="anime" if any(classification.possible_episode for classification in classifications.values()) else None,
             max_queries=config.automatic_review.research_max_queries,
         )
-        adapter = research_adapter or BoundedResearchAdapter(
-            limits=ResearchLimits(
-                max_queries=config.automatic_review.research_max_queries,
-                max_results_per_query=config.automatic_review.research_max_results_per_query,
-                max_sources=config.automatic_review.research_max_sources,
-                max_fetched_chars=config.automatic_review.research_max_fetched_chars,
-                max_evidence_chars=config.automatic_review.research_max_evidence_chars,
-                timeout_seconds=config.automatic_review.research_timeout_seconds,
-            )
-        )
+        adapter = research_adapter or configured_research_adapter(config)
         existing_packet = db.get_research_packet(job_id)
         if existing_packet:
             research_packet = DiscResearchPacket.from_dict(existing_packet)
